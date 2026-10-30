@@ -108,13 +108,17 @@ describe("HubSpot client", () => {
   test("association batch read follows per-record paging", async () => {
     const f = fakeFetch([
       { status: 200, body: { results: [{ from: { id: "c1" }, to: [{ toObjectId: 1 }, { toObjectId: 2 }], paging: { next: { after: "x" } } }, { from: { id: "c2" }, to: [{ toObjectId: 2 }] }] } },
+      { status: 200, body: { results: [{ toObjectId: 1 }, { toObjectId: 2 }], paging: { next: { after: "p2" } } } },
       { status: 200, body: { results: [{ toObjectId: 3 }] } },
     ]);
     const c = new HubSpotClient("t", "https://api.test", 100, f.fn, async () => undefined);
     const m = await c.associations("contacts", "emails", ["c1", "c2"]);
     assert.deepEqual(m.get("c1"), ["1", "2", "3"]);
     assert.deepEqual(m.get("c2"), ["2"]);
-    assert.match(f.calls[1]!.url, /\/crm\/v4\/objects\/contacts\/c1\/associations\/emails\?limit=500&after=x/);
+    // the batch cursor ("x") is never reused on the per-record endpoint; that endpoint is read from the start
+    assert.match(f.calls[1]!.url, /\/crm\/v4\/objects\/contacts\/c1\/associations\/emails\?limit=500$/);
+    assert.match(f.calls[2]!.url, /after=p2/);
+    assert.ok(!f.calls.some((c) => c.url.includes("after=x")));
   });
 });
 
