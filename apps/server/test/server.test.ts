@@ -2,7 +2,7 @@ import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { computeLeadFacts, DEFAULT_RULES } from "@ecc/core";
 import { HubSpotClient, HubSpotError } from "../src/hubspot/client.js";
-import { attendedForEvent, hsDate, hsTimestamp, mapActivity, mapCompany, mapContact, mapDeal, mapEvent } from "../src/hubspot/mappers.js";
+import { attendedForEvent, hsDate, hsTimestamp, mapActivity, mapCompany, mapContact, mapDeal, mapEvent, stageInfoFromPipelines } from "../src/hubspot/mappers.js";
 import * as views from "../src/api/views.js";
 import { act, company, contact, dataset, DISHA, BOBBI } from "../../../packages/core/test/fixtures.js";
 
@@ -57,6 +57,35 @@ describe("HubSpot mappers", () => {
     assert.equal(d.is_closed, false);
     const e = mapEvent({ id: "1", properties: { marketing_event_name: "Beacon Experience Boston", date_of_the_event: "2026-10-05" } }, { name: "marketing_event_name", date: "date_of_the_event", type: "event_type" }, DEFAULT_RULES);
     assert.equal(e.category, "owned");
+  });
+  test("closed-lost deal: date and previous stage from stage history; reasons only when recorded", () => {
+    const info = stageInfoFromPipelines([{ label: "Sales Pipeline", stages: [
+      { id: "qualifiedtobuy", label: "Qualified to buy", metadata: { isClosed: "false", probability: "0.2" } },
+      { id: "decisionmakerboughtin", label: "Proposal Shared / Negotiations", metadata: { isClosed: "false", probability: "0.6" } },
+      { id: "closedlost", label: "Closed lost", metadata: { isClosed: "true", probability: "0.0" } },
+      { id: "closedwon", label: "Closed won", metadata: { isClosed: "true", probability: "1.0" } },
+    ] }]);
+    assert.equal(info.get("closedlost")!.closedLost, true);
+    assert.equal(info.get("closedwon")!.closedWon, true);
+    const d = mapDeal({ id: "50152027684", properties: { dealname: "The Channel Company", dealstage: "closedlost", pipeline: "default", hs_is_closed: "true", hs_is_closed_lost: "true", createdate: "2025-11-24T10:10:45.490Z", closedate: "2026-08-27T18:33:21.127Z" },
+      propertiesWithHistory: { dealstage: [
+        { value: "closedlost", timestamp: "2026-08-27T18:33:21.127Z" },
+        { value: "decisionmakerboughtin", timestamp: "2026-06-22T22:46:50.255Z" },
+        { value: "qualifiedtobuy", timestamp: "2025-11-24T10:10:45.490Z" },
+      ] } }, new Map(), "mql", "sql", info);
+    assert.equal(d.is_closed_lost, true);
+    assert.equal(d.closed_lost_at, "2026-08-27T18:33:21.127Z");
+    assert.equal(d.previous_stage_label, "Proposal Shared / Negotiations (Sales Pipeline)");
+    assert.equal(d.stage_label, "Closed lost (Sales Pipeline)");
+    assert.equal(d.lost_reason, null);
+    assert.equal(d.lost_comment, null);
+    assert.equal(d.stage_history!.length, 3);
+    const withReason = mapDeal({ id: "2", properties: { dealstage: "closedlost", hs_is_closed_lost: "true", closed_lost_reason_: "Budget", closed_lost_reason: "Went with incumbent" } }, new Map(), "m", "s", info);
+    assert.equal(withReason.lost_reason, "Budget");
+    assert.equal(withReason.lost_comment, "Went with incumbent");
+    const open = mapDeal({ id: "3", properties: { dealstage: "qualifiedtobuy", closed_lost_reason_: "stale value" } }, new Map(), "m", "s", info);
+    assert.equal(open.is_closed_lost, false);
+    assert.equal(open.lost_reason, null);
   });
   test("attendance snapshot window", () => {
     assert.equal(attendedForEvent("2026-10-27", "2026-10-27", DEFAULT_RULES), "2026-10-27");
@@ -158,5 +187,38 @@ describe("API views", () => {
     assert.equal(e.groups[0]!.past.length, 1);
     const p = views.performance(facts, new URLSearchParams(""), "2026-10-30");
     assert.equal(p.quarters[0]!.key, "FY2027-Q2");
+  });
+  test("risk summary reconciles and every risk tile drills to the same number of records", () => {
+    const o = views.overview(facts, new URLSearchParams("quarter=all"), "2026-10-30", DEFAULT_RULES);
+    const r = o.risk.all;
+    assert.equal(r.critical + r.at_risk + r.healthy + r.neutral, o.totals.eligible);
+    for (const level of ["critical", "at_risk", "healthy", "neutral"] as const) {
+      const l = views.leads(facts, new URLSearchParams(`quarter=all&bucket=risk_${level}`), "2026-10-30", DEFAULT_RULES);
+      assert.equal(l.total, r[level], level);
+      assert.ok(l.rows.every((x: any) => x.risk === level));
+    }
+    assert.equal(typeof o.narrative, "string");
+    assert.ok(Array.isArray(o.focus));
+    const b = o.sdrRisk[BOBBI]!;
+    if (b.hot.critical > 0) assert.equal(b.health, "critical");
+  });
+  test("existing metrics are unchanged by the risk layer", () => {
+    const before = views.overview(facts, new URLSearchParams("quarter=all"), "2026-10-30");
+    assert.deepEqual(before.hot, views.overview(facts, new URLSearchParams("quarter=all"), "2026-10-30", DEFAULT_RULES).hot);
+    const e = views.events(facts, new URLSearchParams("quarter=all"), "2026-10-30", DEFAULT_RULES);
+    assert.equal(e.groups[0]!.past[0]!.risk!.eligible, e.groups[0]!.past[0]!.eligibleHot + e.groups[0]!.past[0]!.eligibleWarm);
+  });
+  test("account deal history and filter; overview deal context", () => {
+    const withDeals = computeLeadFacts(dataset({
+      deals: [{ id: "L1", name: "Lost deal", stage: "closedlost", stageLabel: "Closed lost", isClosed: true, isWon: false, isClosedLost: true, ownerId: null, amount: null,
+        createdAt: "2025-01-01T00:00:00Z", mqlDate: null, sqlDate: null, closedLostAt: "2026-08-27T18:33:21Z", contactIds: [], companyIds: ["co1"] }],
+    }), DEFAULT_RULES, "2026-10-30");
+    const a = views.accounts(withDeals, new URLSearchParams("quarter=all&deal=lost"), "2026-10-30", DEFAULT_RULES);
+    assert.equal(a.total, 1);
+    assert.equal(a.rows[0]!.deals[0]!.status, "lost");
+    assert.equal(views.accounts(withDeals, new URLSearchParams("quarter=all&deal=open"), "2026-10-30", DEFAULT_RULES).total, 0);
+    const o = views.overview(withDeals, new URLSearchParams("quarter=all"), "2026-10-30", DEFAULT_RULES);
+    assert.equal(o.dealContext.lost, 1);
+    assert.equal(o.dealContext.lostLast90, 1);
   });
 });

@@ -1,7 +1,7 @@
 import { api } from "../api.js";
 import { leadTable, openCustom, openLeads } from "../drawer.js";
 import { buildHash, filterParams, type Route } from "../state.js";
-import { fmt, h, table, type Col } from "../ui.js";
+import { fmt, h, riskBar, table, type Col } from "../ui.js";
 
 export async function eventsView(route: Route): Promise<HTMLElement> {
   const f = route.filters;
@@ -37,13 +37,16 @@ export async function eventsView(route: Route): Promise<HTMLElement> {
     { key: "eligibleHot", label: "Hot", num: true, render: (r) => r.eligibleHot ? h("span", { class: "link", onclick: () => openLeads({ ...f, eventId: r.eventId, quarter: "all", temperature: "Hot" }, "eligible") }, `${r.hotWorked}/${r.eligibleHot}`) : "0", sort: (r) => r.eligibleHot, title: "Worked / eligible" },
     { key: "eligibleWarm", label: "Warm", num: true, render: (r) => r.eligibleWarm ? h("span", { class: "link", onclick: () => openLeads({ ...f, eventId: r.eventId, quarter: "all", temperature: "Warm" }, "eligible") }, `${r.warmWorked}/${r.eligibleWarm}`) : "0", sort: (r) => r.eligibleWarm, title: "Worked / eligible" },
     { key: "coverage", label: "Coverage", num: true, render: (r) => fmt.pct(r.coverage) },
+    { key: "health", label: "Follow-up health", sort: (r) => r.risk?.critical ?? 0, title: "Critical / at risk / healthy / not yet due among eligible leads",
+      render: (r) => r.risk?.eligible ? h("div", { class: "cbar left" }, riskBar(r.risk, (l) => openLeads({ ...f, eventId: r.eventId, quarter: "all" }, `risk_${l}`)),
+        r.risk.critical ? h("span", { class: "link crit-t strong", onclick: () => openLeads({ ...f, eventId: r.eventId, quarter: "all" }, "risk_critical") }, `▲ ${r.risk.critical}`) : null) : h("span", { class: "faint" }, "–") },
     { key: "avgTouches", label: "Avg touches", num: true, render: (r) => fmt.dec(r.avgTouches) },
-    { key: "slaBreaches", label: "SLA missed", num: true, render: (r) => r.slaBreaches ? ev(r, "sla_missed", r.slaBreaches) : "0" },
+    { key: "slaBreaches", label: "SLA missed", num: true, render: (r) => r.slaBreaches ? h("span", { class: "crit-t" }, ev(r, "sla_missed", r.slaBreaches)) : h("span", { class: "faint" }, "0") },
     { key: "neverWorked", label: "Never worked", num: true, render: (r) => r.neverWorked ? ev(r, "never_worked", r.neverWorked) : "0" },
-    { key: "stalled", label: "Stalled", num: true, render: (r) => r.stalled ? ev(r, "stalled", r.stalled) : "0" },
+    { key: "stalled", label: "Stalled", num: true, render: (r) => r.stalled ? h("span", { class: "crit-t" }, ev(r, "stalled", r.stalled)) : h("span", { class: "faint" }, "0") },
     { key: "multiWeek", label: "Multi-week", num: true },
-    { key: "opportunities", label: "Opps", num: true, title: "Deals with an MQL or create date within 90 days after the event" },
-    { key: "sqls", label: "SQLs", num: true },
+    { key: "opportunities", label: "MQLs", num: true, title: "Deals whose MQL date is within 90 days after the event" },
+    { key: "sqls", label: "SQLs", num: true, title: "Deals whose SQL date is within 90 days after the event, excluding deals that were already MQL before the event" },
   ];
 
   const tabs = h("div", { class: "tabs" }, d.groups.map((x: any) => h("button", {
@@ -59,7 +62,7 @@ export async function eventsView(route: Route): Promise<HTMLElement> {
     !g ? h("div", { class: "empty" }, "No events match the filters") :
       h("div", { class: "card" }, phase === "pre"
         ? table(pre, g.upcoming, { initialSort: "date", desc: false, empty: "No upcoming events in this period. Choose “All quarters” or a later quarter to plan ahead." })
-        : table(post, g.past, { initialSort: "date", empty: "No completed events in this period" })),
+        : table(post, g.past, { initialSort: "date", empty: "No completed events in this period", rowClass: (r) => (r.risk?.critical ? "row-crit" : "") })),
     tab === "sponsored" ? h("p", { class: "legend" }, "Sponsored events: only attendees (or contacts with a prior conversation) are eligible for follow-up. Registrants without recorded attendance are excluded.") : null,
   );
 }
@@ -70,8 +73,10 @@ async function openEvent(id: string, name: string) {
   const box = h("div", null,
     h("div", { class: "kv" },
       ...[["Date", fmt.day(s.date)], ["Category", s.category], ["Registered", s.registered], ["Attended", s.attendanceRate === null ? "Not recorded" : `${s.attended} (${fmt.pct(s.attendanceRate)})`],
-        ["Eligible hot / warm", `${s.eligibleHot} / ${s.eligibleWarm}`], ["Coverage", fmt.pct(s.coverage)], ["Opportunities / SQLs", `${s.opportunities} / ${s.sqls}`]]
-        .flatMap(([k, v]) => [h("div", { class: "k" }, String(k)), h("div", null, String(v))])),
+        ["Eligible hot / warm", `${s.eligibleHot} / ${s.eligibleWarm}`], ["Coverage", fmt.pct(s.coverage)], ["MQLs / SQLs (≤90 days)", `${s.opportunities} / ${s.sqls}`]]
+        .flatMap(([k, v]) => [h("div", { class: "k" }, String(k)), h("div", null, String(v))]),
+      d.risk?.eligible ? [h("div", { class: "k" }, "Follow-up health"), h("div", { class: "kvbar" }, riskBar(d.risk),
+        `▲ ${d.risk.critical} critical · ◆ ${d.risk.at_risk} at risk · ● ${d.risk.healthy} healthy · ○ ${d.risk.neutral} not yet due`)] : null),
     leadTable(d.leads));
   openCustom(name, "All registrants, eligible and not", box);
 }

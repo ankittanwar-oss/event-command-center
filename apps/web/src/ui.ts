@@ -47,9 +47,13 @@ export const fmt = {
 };
 
 export const STATUS_CLASS: Record<string, string> = {
-  never_worked: "bad", stalled: "bad", unverifiable: "info", first_touch: "warm", active: "good", in_play: "accent",
+  never_worked: "", stalled: "bad", unverifiable: "", first_touch: "", active: "good", in_play: "good",
 };
-export function statusPill(status: string, label: string) { return h("span", { class: `pill ${STATUS_CLASS[status] ?? ""}` }, label); }
+/** Status label; colored by the lead's risk level when known, so color always means the same thing. */
+export function statusPill(status: string, label: string, risk?: string | null) {
+  const cls = risk ? ({ critical: "bad", at_risk: "warnr", healthy: "good", neutral: "" } as Record<string, string>)[risk] ?? "" : STATUS_CLASS[status] ?? "";
+  return h("span", { class: `pill ${cls}` }, label);
+}
 export function tempPill(t: string | null) { return t ? h("span", { class: `pill ${t === "Hot" ? "hot" : "warm"}` }, t) : h("span", { class: "faint" }, "–"); }
 
 let portalId = "7712708";
@@ -62,8 +66,42 @@ export function hsLink(kind: "contact" | "company" | "deal", id: string | null |
 
 export interface Col<T> { key: string; label: string; num?: boolean; render?: (r: T) => Child; sort?: (r: T) => string | number | null; title?: string; wrap?: boolean }
 
+// ---- Risk system: color is always paired with a shape and a word, so it reads without color too.
+export type Risk = "critical" | "at_risk" | "healthy" | "neutral";
+export const RISK: Record<Risk, { label: string; icon: string; cls: string }> = {
+  critical: { label: "Critical", icon: "▲", cls: "crit" },
+  at_risk: { label: "At risk", icon: "◆", cls: "warnr" },
+  healthy: { label: "Healthy", icon: "●", cls: "ok" },
+  neutral: { label: "Not yet due", icon: "○", cls: "neu" },
+};
+export function riskPill(level: string | null | undefined, label?: string, title?: string) {
+  if (!level || !(level in RISK)) return h("span", { class: "rp neu", title: title ?? "Not eligible for follow-up" }, h("i", null, "–"), label ?? "Not eligible");
+  const m = RISK[level as Risk];
+  return h("span", { class: `rp ${m.cls}`, title }, h("i", { "aria-hidden": "true" }, m.icon), label ?? m.label);
+}
+/** Small inline marker for a number cell. Healthy/neutral stay quiet (no marker). */
+export function flag(level: Risk | null, content: Child, title?: string) {
+  if (!level || level === "healthy" || level === "neutral") return h("span", { title }, content);
+  const m = RISK[level];
+  return h("span", { class: `flag ${m.cls}`, title: title ?? m.label }, h("i", { "aria-hidden": "true" }, m.icon), content);
+}
+/** Compact horizontal stacked bar: critical / at risk / healthy / neutral. Each segment is clickable. */
+export function riskBar(c: { eligible: number; critical: number; at_risk: number; healthy: number; neutral: number }, onPick?: (level: Risk) => void) {
+  const seg = (level: Risk) => {
+    const n = c[level];
+    if (!n || !c.eligible) return null;
+    const pctv = (n / c.eligible) * 100;
+    return h("span", {
+      class: `seg ${RISK[level].cls}`, style: `width:${pctv}%`, title: `${RISK[level].label}: ${n} (${pctv.toFixed(1)}%)`,
+      onclick: onPick ? () => onPick(level) : undefined,
+    });
+  };
+  return h("div", { class: "rbar", role: "img", "aria-label": `Critical ${c.critical}, at risk ${c.at_risk}, healthy ${c.healthy}, not yet due ${c.neutral}` },
+    c.eligible ? [seg("critical"), seg("at_risk"), seg("healthy"), seg("neutral")] : h("span", { class: "seg empty", style: "width:100%" }));
+}
+
 /** Sortable table. Sorting is client-side on already-filtered rows. */
-export function table<T>(cols: Col<T>[], rows: T[], opts: { empty?: string; initialSort?: string; desc?: boolean } = {}): HTMLElement {
+export function table<T>(cols: Col<T>[], rows: T[], opts: { empty?: string; initialSort?: string; desc?: boolean; rowClass?: (r: T) => string } = {}): HTMLElement {
   let sortKey = opts.initialSort ?? "";
   let desc = opts.desc ?? true;
   const wrap = h("div", { class: "tbl-wrap" });
@@ -84,7 +122,7 @@ export function table<T>(cols: Col<T>[], rows: T[], opts: { empty?: string; init
       class: `${c.num ? "n " : ""}sortable`, title: c.title,
       onclick: () => { if (sortKey === c.key) desc = !desc; else { sortKey = c.key; desc = true; } render(); },
     }, c.label, sortKey === c.key ? (desc ? " ↓" : " ↑") : ""))));
-    const tbody = h("tbody", null, data.length ? data.map((r) => h("tr", null, cols.map((c) => h("td", { class: `${c.num ? "n" : ""} ${c.wrap ? "wrap" : ""}` }, c.render ? c.render(r) : String((r as any)[c.key] ?? "–"))))) :
+    const tbody = h("tbody", null, data.length ? data.map((r) => h("tr", { class: opts.rowClass?.(r) || undefined }, cols.map((c) => h("td", { class: `${c.num ? "n" : ""} ${c.wrap ? "wrap" : ""}` }, c.render ? c.render(r) : String((r as any)[c.key] ?? "–"))))) :
       h("tr", null, h("td", { colspan: cols.length, class: "empty" }, opts.empty ?? "No records")));
     wrap.replaceChildren(h("table", null, thead, tbody));
   };
@@ -102,4 +140,29 @@ export function delta(cur: number | null, prev: number | null, unit = "pt", high
   if (d === 0) return h("span", { class: "faint" }, "±0");
   const good = (d > 0) === higherIsBetter;
   return h("span", { class: `delta ${good ? "up" : "down"}` }, `${d > 0 ? "+" : ""}${d}${unit}`);
+}
+
+// ---- Deal history (context only: never part of the risk colors, never counted as event pipeline)
+export const DEAL_LABEL: Record<string, string> = { open: "Open opportunity", won: "Closed won", lost: "Closed lost", none: "No associated deal" };
+
+export function dealPill(status: string | null | undefined, detail?: string) {
+  const st = status ?? "none";
+  return h("span", { class: `dp ${st}`, title: detail ?? DEAL_LABEL[st] }, st === "lost" ? "✕ " : st === "won" ? "✓ " : st === "open" ? "◷ " : "", DEAL_LABEL[st] ?? st, detail ? h("span", { class: "dpd" }, ` · ${detail}`) : null);
+}
+
+/** Every deal on the account/contact, most relevant first, with closed-lost details exactly as recorded in HubSpot. */
+export function dealTable(deals: any[]) {
+  if (!deals?.length) return h("div", { class: "faint", style: "padding:6px 0" }, "No associated deal in HubSpot.");
+  return table<any>([
+    { key: "name", label: "Deal", wrap: true, render: (d) => [d.name ?? `Deal ${d.id}`, hsLink("deal", d.id)] },
+    { key: "status", label: "Status", render: (d) => dealPill(d.status) },
+    { key: "stageLabel", label: "Current stage", wrap: true, render: (d) => d.stageLabel ?? "–" },
+    { key: "timing", label: "Relative to event", title: "Pre-existing = reached MQL (or, with no MQL date, was created) before the event", render: (d) => d.timing === "before_event" ? h("span", { class: "pill" }, "Pre-existing") : d.timing === "after_event" ? h("span", { class: "pill info" }, "New since event") : "–" },
+    { key: "createdAt", label: "Created", render: (d) => fmt.day(d.createdAt) },
+    { key: "closedAt", label: "Closed", render: (d) => fmt.day(d.closedAt) },
+    { key: "previousStageLabel", label: "Stage before closed lost", wrap: true, render: (d) => (d.status === "lost" ? d.previousStageLabel ?? h("span", { class: "faint" }, "Not available") : "–") },
+    { key: "lostReason", label: "Closed lost reason", wrap: true, render: (d) => d.status !== "lost" ? "–" :
+      [d.lostReason, d.lostSubReason, d.lostComment].filter(Boolean).length ? [d.lostReason, d.lostSubReason, d.lostComment].filter(Boolean).join(" · ") : h("span", { class: "faint" }, "No reason recorded in HubSpot") },
+    { key: "via", label: "Associated with", render: (d) => d.via === "contact" ? "This contact" : h("span", { class: "muted", title: "Linked to the company only; not necessarily this contact's deal" }, "Company only") },
+  ], deals, { initialSort: "", desc: false });
 }

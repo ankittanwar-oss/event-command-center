@@ -1,6 +1,6 @@
 import {
   accountQueue, applyFilters, BUCKETS, categoryBreakdown, CATEGORY_LABEL, dataQuality, eventSummaries, fiscalQuarterOf, inBucket, nextAction,
-  normalizeFilters, parseQuarterKey, previousQuarter, qoq, quarterMetrics, regionBreakdown, rosterById, SDR_ROSTER, sdrTable, STATUS_LABEL, temperatureSummary,
+  normalizeFilters, parseQuarterKey, DEFAULT_RULES, dealOrder, type DealRef, findings, narrative, RISK_LABEL, riskCounts, riskOf, sdrRisk, previousQuarter, qoq, quarterMetrics, regionBreakdown, rosterById, SDR_ROSTER, sdrTable, STATUS_LABEL, temperatureSummary,
   type EventCategory, type Filters, type LeadFact, type NormalizedFilters, type Region, type Rules,
 } from "@ecc/core";
 
@@ -36,7 +36,45 @@ export function filtered(facts: LeadFact[], q: URLSearchParams, today: string, o
   return { nf, rows: applyFilters(facts, nf) };
 }
 
-export function overview(facts: LeadFact[], q: URLSearchParams, today: string) {
+/** Adds the presentation-only risk level to a lead record. */
+function withRisk(f: LeadFact, rules: Rules) {
+  const r = riskOf(f, rules);
+  return { ...f, nextAction: nextAction(f, rules), statusLabel: STATUS_LABEL[f.status], risk: r?.level ?? null, riskLabel: r ? RISK_LABEL[r.level] : null, riskReason: r?.reason ?? null };
+}
+
+/** Bucket predicate including the risk buckets (risk_critical, risk_at_risk, risk_healthy, risk_neutral). */
+function matches(f: LeadFact, bucket: string, rules: Rules): boolean {
+  if (bucket.startsWith("risk_")) return riskOf(f, rules)?.level === bucket.slice(5);
+  return inBucket(f, bucket);
+}
+
+/** Deal history across an account's contacts, de-duplicated by deal id, most relevant first. */
+function accountDeals(leads: LeadFact[]): DealRef[] {
+  const m = new Map<string, DealRef>();
+  for (const l of leads) for (const d of l.deals ?? []) {
+    const prev = m.get(d.id);
+    // a deal linked to any of the account's contacts directly is shown as "contact"
+    m.set(d.id, prev && prev.via === "contact" ? prev : d);
+  }
+  return [...m.values()].sort(dealOrder);
+}
+
+/** Compact deal context for the CMO overview: eligible accounts by most relevant deal status. Context only. */
+function dealContext(rows: LeadFact[], today: string) {
+  const byAccount = new Map<string, LeadFact[]>();
+  for (const f of rows) if (f.eligible) (byAccount.get(f.companyId ?? `c:${f.contactId}`) ?? byAccount.set(f.companyId ?? `c:${f.contactId}`, []).get(f.companyId ?? `c:${f.contactId}`)!).push(f);
+  const out = { accounts: byAccount.size, open: 0, won: 0, lost: 0, none: 0, lostLast90: 0, hasHistory: rows.some((f) => f.deals !== undefined) };
+  const cutoff = new Date(Date.parse(`${today}T00:00:00Z`) - 90 * 86_400_000).toISOString();
+  for (const leads of byAccount.values()) {
+    const deals = accountDeals(leads);
+    const top = deals[0]?.status ?? "none";
+    out[top]++;
+    if (deals.some((d) => d.status === "lost" && (d.closedAt ?? "") >= cutoff)) out.lostLast90++;
+  }
+  return out;
+}
+
+export function overview(facts: LeadFact[], q: URLSearchParams, today: string, rules: Rules = DEFAULT_RULES) {
   const { nf, rows } = filtered(facts, q, today);
   const cur = nf.quarter ? parseQuarterKey(nf.quarter) : null;
   const prevKey = cur ? previousQuarter(cur) : null;
@@ -46,6 +84,7 @@ export function overview(facts: LeadFact[], q: URLSearchParams, today: string) {
     previous = quarterMetrics(all, prevKey, today);
   }
   const current = cur ? quarterMetrics(rows, cur, today) : null;
+  const top = findings(rows, rules);
   return {
     filters: nf,
     hot: temperatureSummary(rows, "Hot"),
@@ -61,38 +100,55 @@ export function overview(facts: LeadFact[], q: URLSearchParams, today: string) {
       attention: rows.filter(BUCKETS.attention).length,
     },
     comparison: current && previous ? { current, previous } : null,
+    risk: {
+      all: riskCounts(rows, rules),
+      Hot: riskCounts(rows.filter((f) => f.temperature === "Hot"), rules),
+      Warm: riskCounts(rows.filter((f) => f.temperature === "Warm"), rules),
+    },
+    sdrRisk: Object.fromEntries(sdrTable(rows, nf).map((s) => [s.ownerId, sdrRisk(rows, s.ownerId, rules)])),
+    focus: top,
+    dealContext: dealContext(rows, today),
+    narrative: narrative(rows, rules, top),
+    slaDays: { Hot: rules.cadence.Hot.firstTouchBusinessDays, Warm: rules.cadence.Warm.firstTouchBusinessDays },
   };
 }
 
 export function leads(facts: LeadFact[], q: URLSearchParams, today: string, rules: Rules) {
   const { nf, rows } = filtered(facts, q, today);
   const bucket = (q.get("bucket") || "").trim();
-  const list = bucket ? rows.filter((f) => inBucket(f, bucket)) : rows;
+  const list = bucket ? rows.filter((f) => matches(f, bucket, rules)) : rows;
   list.sort((a, b) => b.priority - a.priority || (a.eventDate ?? "").localeCompare(b.eventDate ?? ""));
   const limit = Math.min(5000, Number(q.get("limit") || 1000));
   return {
     filters: nf, bucket: bucket || null, total: list.length,
-    rows: list.slice(0, limit).map((f) => ({ ...f, nextAction: nextAction(f, rules), statusLabel: STATUS_LABEL[f.status] })),
+    rows: list.slice(0, limit).map((f) => withRisk(f, rules)),
   };
 }
 
-export function sdrs(facts: LeadFact[], q: URLSearchParams, today: string) {
+export function sdrs(facts: LeadFact[], q: URLSearchParams, today: string, rules: Rules = DEFAULT_RULES) {
   const { nf, rows } = filtered(facts, q, today);
-  return { filters: nf, rows: sdrTable(rows, nf) };
+  return { filters: nf, rows: sdrTable(rows, nf).map((r) => ({ ...r, risk: sdrRisk(rows, r.ownerId, rules) })) };
 }
 
 export function accounts(facts: LeadFact[], q: URLSearchParams, today: string, rules: Rules) {
   const { nf, rows } = filtered(facts, q, today);
   const health = (q.get("health") || "").trim();
-  let list = accountQueue(rows, rules);
+  const dealFilter = (q.get("deal") || "").trim();
+  let list = accountQueue(rows, rules).map((a) => {
+    const deals = accountDeals(a.contacts);
+    return { ...a, deals, dealStatus: deals[0]?.status ?? "none" };
+  });
   if (health) list = list.filter((a) => a.health === health);
+  if (["open", "won", "lost", "none"].includes(dealFilter)) list = list.filter((a) => (dealFilter === "lost" ? a.deals.some((d) => d.status === "lost") : a.dealStatus === dealFilter));
   const limit = Math.min(1000, Number(q.get("limit") || 300));
   return {
     filters: nf, total: list.length,
     rows: list.slice(0, limit).map((a) => ({
       ...a,
       healthLabel: STATUS_LABEL[a.health],
+      risk: worstRisk(a.contacts.map((c) => riskOf(c, rules)?.level ?? null)),
       contacts: a.contacts.map((c) => ({
+        risk: riskOf(c, rules)?.level ?? null, riskReason: riskOf(c, rules)?.reason ?? null,
         contactId: c.contactId, contactName: c.contactName, contactEmail: c.contactEmail, jobTitle: c.jobTitle, eventId: c.eventId, eventName: c.eventName,
         eventDate: c.eventDate, temperature: c.temperature, status: c.status, statusLabel: STATUS_LABEL[c.status], statusReason: c.statusReason,
         touches: c.touchesSinceEligibility, lastTouchAt: c.lastTouchAt, nextTaskDue: c.nextTaskDue, attendance: c.attendance, nextAction: nextAction(c, rules),
@@ -101,9 +157,16 @@ export function accounts(facts: LeadFact[], q: URLSearchParams, today: string, r
   };
 }
 
-export function events(facts: LeadFact[], q: URLSearchParams, today: string) {
+const RISK_ORDER = ["critical", "at_risk", "neutral", "healthy"] as const;
+function worstRisk(levels: Array<string | null>): string | null {
+  return RISK_ORDER.find((l) => levels.includes(l)) ?? null;
+}
+
+export function events(facts: LeadFact[], q: URLSearchParams, today: string, rules: Rules = DEFAULT_RULES) {
   const { nf, rows } = filtered(facts, q, today);
-  const list = eventSummaries(rows);
+  const riskByEvent = new Map<string, ReturnType<typeof riskCounts>>();
+  for (const id of new Set(rows.map((f) => f.eventId))) riskByEvent.set(id, riskCounts(rows.filter((f) => f.eventId === id), rules));
+  const list = eventSummaries(rows).map((e) => ({ ...e, risk: riskByEvent.get(e.eventId) ?? null }));
   const groups = (["owned", "sponsored", "webinar", "roundtable", "uncategorized"] as EventCategory[]).map((c) => ({
     category: c, label: CATEGORY_LABEL[c],
     upcoming: list.filter((e) => e.category === c && e.upcoming).sort((a, b) => (a.date ?? "").localeCompare(b.date ?? "")),
@@ -118,7 +181,8 @@ export function eventDetail(facts: LeadFact[], eventId: string, rules: Rules) {
   const [summary] = eventSummaries(rows);
   return {
     summary,
-    leads: rows.sort((a, b) => b.priority - a.priority).map((f) => ({ ...f, nextAction: nextAction(f, rules), statusLabel: STATUS_LABEL[f.status] })),
+    risk: riskCounts(rows, rules),
+    leads: rows.sort((a, b) => b.priority - a.priority).map((f) => withRisk(f, rules)),
   };
 }
 

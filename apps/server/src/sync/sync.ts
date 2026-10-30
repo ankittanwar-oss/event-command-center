@@ -6,7 +6,7 @@ import { existingIds, loadDataset, replaceLeadFacts, replaceLinks, upsert } from
 import { HubSpotClient } from "../hubspot/client.js";
 import {
   ACTIVITY_PROPERTIES, ACTIVITY_TYPES, COMPANY_PROPERTIES, CONTACT_PROPERTIES, DEAL_PROPERTIES_BASE,
-  attendedForEvent, mapActivity, mapCompany, mapContact, mapDeal, mapEvent, mapOwner, mapTask, type ActivityRow, type ActivityType,
+  attendedForEvent, stageInfoFromPipelines, mapActivity, mapCompany, mapContact, mapDeal, mapEvent, mapOwner, mapTask, type ActivityRow, type ActivityType,
 } from "../hubspot/mappers.js";
 import { loadRules } from "../rules.js";
 
@@ -250,13 +250,23 @@ async function syncAll(hs: HubSpotClient, rules: Rules, full: boolean, records: 
   const dealsByCompany = companyIds.length ? await hs.associations("companies", "deals", companyIds) : new Map<string, string[]>();
   const dealIds = [...new Set([...dealsByContact.values(), ...dealsByCompany.values()].flat())];
   const stageLabels = new Map<string, string>();
-  for (const p of await hs.dealPipelines()) for (const s of p.stages ?? []) stageLabels.set(s.id, `${s.label} (${p.label})`);
+  const pipelines = await hs.dealPipelines();
+  for (const p of pipelines) for (const s of p.stages ?? []) stageLabels.set(s.id, `${s.label} (${p.label})`);
+  const stageInfo = stageInfoFromPipelines(pipelines);
   const dealProps = [...new Set([...DEAL_PROPERTIES_BASE, env.dealMqlProperty, env.dealSqlProperty])];
-  const deals = (await hs.batchRead("deals", dealIds, dealProps)).map((r) => mapDeal(r, stageLabels, env.dealMqlProperty, env.dealSqlProperty));
+  const deals: ReturnType<typeof mapDeal>[] = [];
+  // 50 per request when property history is requested (deal stage history drives the closed-lost details)
+  for (let i = 0; i < dealIds.length; i += 50) {
+    const batch = await hs.batchRead("deals", dealIds.slice(i, i + 50), dealProps, ["dealstage"]);
+    deals.push(...batch.map((r) => mapDeal(r, stageLabels, env.dealMqlProperty, env.dealSqlProperty, stageInfo)));
+  }
   records.deals = await upsert(db, "deals", [
     "id text", "name text", "stage text", "stage_label text", "is_closed boolean", "is_won boolean", "owner_id text", "amount numeric",
     "created_at timestamptz", "mql_date date", "sql_date date",
+    "pipeline text", "pipeline_label text", "close_date timestamptz", "is_closed_lost boolean", "closed_lost_at timestamptz", "previous_stage_label text",
+    "lost_reason text", "lost_sub_reason text", "lost_comment text", "stage_history jsonb",
   ], deals as any, ["id"]);
+  records.deals_closed_lost = deals.filter((x) => x.is_closed_lost).length;
   const storedDeals = new Set(deals.map((x) => x.id));
   await tx(async (c) => {
     const dc: Array<[string, string]> = [];

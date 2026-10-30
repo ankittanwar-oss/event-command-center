@@ -23,7 +23,11 @@ export const ACTIVITY_PROPERTIES: Record<ActivityType, string[]> = {
   tasks: ["hs_timestamp", "hubspot_owner_id", "hs_task_status", "hs_task_type", "hs_task_subject", "hs_task_completion_date"],
 };
 
-export const DEAL_PROPERTIES_BASE = ["dealname", "dealstage", "pipeline", "hs_is_closed", "hs_is_closed_won", "hubspot_owner_id", "amount", "createdate"];
+export const DEAL_PROPERTIES_BASE = [
+  "dealname", "dealstage", "pipeline", "hs_is_closed", "hs_is_closed_won", "hs_is_closed_lost", "hubspot_owner_id", "amount", "createdate", "closedate",
+  // Closed-lost context exactly as recorded in HubSpot (portal 7712708). Shown only when present; never inferred.
+  "closed_lost_reason_", "closed_lost_sub_reason", "closed_lost_reason",
+];
 
 const s = (v: unknown): string | null => (v === undefined || v === null || v === "" ? null : String(v));
 const truthy = (v: unknown) => ["true", "1", "yes"].includes(String(v ?? "").toLowerCase());
@@ -161,16 +165,64 @@ export function mapTask(r: any): TaskRow {
 export interface DealRow {
   id: string; name: string | null; stage: string | null; stage_label: string | null; is_closed: boolean; is_won: boolean;
   owner_id: string | null; amount: number | null; created_at: string | null; mql_date: string | null; sql_date: string | null;
+  pipeline: string | null; pipeline_label: string | null; close_date: string | null; is_closed_lost: boolean;
+  closed_lost_at: string | null; previous_stage_label: string | null;
+  lost_reason: string | null; lost_sub_reason: string | null; lost_comment: string | null;
+  stage_history: Array<{ stage: string; label: string; at: string }> | null;
 }
-export function mapDeal(r: any, stageLabels: Map<string, string>, mqlProp: string, sqlProp: string): DealRow {
+export interface StageInfo { label: string; pipelineLabel: string; closedLost: boolean; closedWon: boolean }
+
+/** Stage metadata from the deal pipelines API: closed-lost = isClosed and probability 0. */
+export function stageInfoFromPipelines(pipelines: Array<{ label: string; stages?: Array<{ id: string; label: string; metadata?: Record<string, string> }> }>): Map<string, StageInfo> {
+  const m = new Map<string, StageInfo>();
+  for (const p of pipelines) for (const st of p.stages ?? []) {
+    const closed = String(st.metadata?.isClosed ?? "").toLowerCase() === "true";
+    const prob = Number(st.metadata?.probability ?? NaN);
+    m.set(st.id, { label: st.label, pipelineLabel: p.label, closedLost: closed && prob === 0, closedWon: closed && prob === 1 });
+  }
+  return m;
+}
+
+export function mapDeal(r: any, stageLabels: Map<string, string>, mqlProp: string, sqlProp: string, stageInfo: Map<string, StageInfo> = new Map()): DealRow {
   const p = r.properties ?? {};
   const stage = s(p.dealstage);
   const amount = p.amount === undefined || p.amount === null || p.amount === "" ? null : Number(p.amount);
+  const label = (id: string) => (stageInfo.get(id) ? `${stageInfo.get(id)!.label} (${stageInfo.get(id)!.pipelineLabel})` : stageLabels.get(id) ?? id);
+  const isLost = (id: string | null) => !!id && (stageInfo.get(id)?.closedLost ?? false);
+
+  // Stage history (oldest first) from HubSpot's property history for "dealstage".
+  const raw: any[] | undefined = r.propertiesWithHistory?.dealstage;
+  const history = raw?.length
+    ? raw.filter((h) => h?.value && h?.timestamp)
+      .map((h) => ({ stage: String(h.value), label: label(String(h.value)), at: hsTimestamp(h.timestamp) ?? String(h.timestamp) }))
+      .sort((a, b) => a.at.localeCompare(b.at))
+    : null;
+
+  const closedLost = truthy(p.hs_is_closed_lost) || isLost(stage);
+  let closedLostAt: string | null = null;
+  let previous: string | null = null;
+  if (closedLost && history?.length) {
+    // the most recent move INTO a closed-lost stage, and the stage held right before it
+    for (let i = history.length - 1; i >= 0; i--) {
+      const cur = history[i]!;
+      const prev = history[i - 1];
+      if (isLost(cur.stage) && (!prev || !isLost(prev.stage))) { closedLostAt = cur.at; previous = prev ? prev.label : null; break; }
+    }
+  }
+  if (closedLost && !closedLostAt) closedLostAt = hsTimestamp(p.closedate); // HubSpot sets the close date when a deal is closed
+
   return {
-    id: String(r.id), name: s(p.dealname), stage, stage_label: stage ? stageLabels.get(stage) ?? stage : null,
+    id: String(r.id), name: s(p.dealname), stage, stage_label: stage ? label(stage) : null,
     is_closed: truthy(p.hs_is_closed), is_won: truthy(p.hs_is_closed_won), owner_id: s(p.hubspot_owner_id),
     amount: Number.isFinite(amount as number) ? amount : null, created_at: hsTimestamp(p.createdate),
     mql_date: hsDate(p[mqlProp]), sql_date: hsDate(p[sqlProp]),
+    pipeline: s(p.pipeline), pipeline_label: stage ? stageInfo.get(stage)?.pipelineLabel ?? null : null,
+    close_date: hsTimestamp(p.closedate), is_closed_lost: closedLost,
+    closed_lost_at: closedLost ? closedLostAt : null, previous_stage_label: closedLost ? previous : null,
+    lost_reason: closedLost ? s(p.closed_lost_reason_) : null,
+    lost_sub_reason: closedLost ? s(p.closed_lost_sub_reason) : null,
+    lost_comment: closedLost ? s(p.closed_lost_reason) : null,
+    stage_history: history,
   };
 }
 

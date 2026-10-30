@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
-import { mergeRules, rosterById, touchKind, type Activity } from "@ecc/core";
+import { mergeRules, nextAction, RISK_LABEL, riskOf, rosterById, touchKind, type Activity } from "@ecc/core";
 import { env, today } from "../env.js";
 import { errMessage, log } from "../log.js";
 import { getPool } from "../db/pool.js";
@@ -53,11 +53,11 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL) {
 
   if (method === "GET") {
     switch (p) {
-      case "/api/overview": return send(res, 200, v.overview(s.facts, q, t));
+      case "/api/overview": return send(res, 200, v.overview(s.facts, q, t, rules));
       case "/api/leads": return send(res, 200, v.leads(s.facts, q, t, rules));
-      case "/api/sdr": return send(res, 200, v.sdrs(s.facts, q, t));
+      case "/api/sdr": return send(res, 200, v.sdrs(s.facts, q, t, rules));
       case "/api/accounts": return send(res, 200, v.accounts(s.facts, q, t, rules));
-      case "/api/events": return send(res, 200, v.events(s.facts, q, t));
+      case "/api/events": return send(res, 200, v.events(s.facts, q, t, rules));
       case "/api/performance": return send(res, 200, v.performance(s.facts, q, t));
       case "/api/data-quality": return send(res, 200, v.quality(s.facts, q, t));
       case "/api/admin/sync-runs": {
@@ -106,7 +106,8 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL) {
         }
         return { ...a, hsId: row.hs_id, via: row.via, ownerName: rosterById.get(a.ownerId ?? "")?.name ?? row.owner_id, counted: counted.has(a.id), why };
       });
-      return send(res, 200, { lead: fact, nextAction: undefined, activities });
+      const risk = riskOf(fact, rules);
+      return send(res, 200, { lead: fact, nextAction: nextAction(fact, rules), risk: risk?.level ?? null, riskLabel: risk ? RISK_LABEL[risk.level] : null, riskReason: risk?.reason ?? null, activities });
     }
   }
 

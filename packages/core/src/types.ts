@@ -98,6 +98,33 @@ export interface Deal {
   sqlDate: string | null;
   contactIds: string[];
   companyIds: string[];
+  // Deal history (filled by the sync from HubSpot; null for records synced before this was added)
+  pipelineLabel?: string | null;
+  closeDate?: string | null;
+  isClosedLost?: boolean | null;
+  closedLostAt?: string | null;
+  previousStageLabel?: string | null;
+  lostReason?: string | null;
+  lostSubReason?: string | null;
+  lostComment?: string | null;
+}
+
+export type DealStatus = "open" | "won" | "lost" | "none";
+
+/** A deal shown as context on a lead. Context only: never counted as event pipeline unless it is in attributedDeals. */
+export interface DealRef {
+  id: string;
+  name: string | null;
+  status: Exclude<DealStatus, "none">;
+  stageLabel: string | null;
+  createdAt: string | null;
+  closedAt: string | null;            // closed-lost date (stage history) or close date for won/lost deals
+  previousStageLabel: string | null;  // stage held before closed lost, when known
+  lostReason: string | null;
+  lostSubReason: string | null;
+  lostComment: string | null;
+  timing: "before_event" | "after_event" | "unknown";   // pre-existing (MQL, or creation if never MQL, before the event) / new since the event
+  via: "contact" | "company";          // associated with this contact, or only with the company
 }
 
 export interface Owner {
@@ -174,6 +201,9 @@ export interface LeadFact {
   icpPriority: boolean;               // Tier 1A / Tier 1 / Tier 2
   attributedDeals: string[];
   sqlDeals: string[];
+  /** Most relevant deal status across the contact's and company's deals (context only). Optional for old snapshots. */
+  dealStatus?: DealStatus;
+  deals?: DealRef[];
   dataQuality: string[];
   priority: number;                   // higher = more urgent
 }

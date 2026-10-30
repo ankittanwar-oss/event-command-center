@@ -2,7 +2,7 @@ import { contactTouches, touchKind } from "./activities.js";
 import { isRosterSdr, sdrRegion, type CadenceRule, type Rules } from "./config.js";
 import { addDays, businessDaysBetween, daysBetween, fiscalQuarterOf, isoWeek, maxDay, toDate } from "./dates.js";
 import type {
-  Activity, AttendanceStatus, Company, Contact, Deal, EventContact, EventRecord, FollowUpStatus, LeadFact, Task, Temperature,
+  Activity, AttendanceStatus, Company, Contact, Deal, DealRef, EventContact, EventRecord, FollowUpStatus, LeadFact, Task, Temperature,
 } from "./types.js";
 
 export interface Dataset {
@@ -221,8 +221,28 @@ export function computeLeadFact(
   }
 
   const inWindow = (d: string | null) => !!d && !!ev.date && toDate(d)! >= ev.date && daysBetween(ev.date, toDate(d)!) <= rules.dealAttributionDays;
-  const attributedDeals = ev.date ? deals.filter((d) => inWindow(d.mqlDate) || inWindow(d.createdAt)).map((d) => d.id) : [];
-  const sqlDeals = ev.date ? deals.filter((d) => inWindow(d.sqlDate)).map((d) => d.id) : [];
+  // Event attribution (MQL only): the deal's MQL date falls within the window after the event. A deal is "historical"
+  // when it had already reached MQL before the event (or, with no MQL date, was created before it). Deal records in
+  // this portal are often created early in a lead pipeline, so the create date alone does not make a deal historical.
+  const historical = (d: Deal) => !!ev.date && ((d.mqlDate ? d.mqlDate < ev.date : !!d.createdAt && toDate(d.createdAt)! < ev.date));
+  const attributedDeals = ev.date ? deals.filter((d) => inWindow(d.mqlDate)).map((d) => d.id) : [];
+  const sqlDeals = ev.date ? deals.filter((d) => inWindow(d.sqlDate) && !historical(d)).map((d) => d.id) : [];
+
+  // Deal history as context (does not affect eligibility, status or attribution)
+  const contactDealIds = new Set((ds.dealsByContact.get(contact.id) ?? []).map((d) => d.id));
+  const dealRefs: DealRef[] = deals.map((d) => {
+    const status: DealRef["status"] = d.isWon ? "won" : d.isClosedLost || (d.isClosed && !d.isWon) ? "lost" : "open";
+    return {
+      id: d.id, name: d.name, status, stageLabel: d.stageLabel,
+      createdAt: d.createdAt, closedAt: status === "lost" ? d.closedLostAt ?? d.closeDate ?? null : status === "won" ? d.closeDate ?? null : null,
+      previousStageLabel: status === "lost" ? d.previousStageLabel ?? null : null,
+      lostReason: status === "lost" ? d.lostReason ?? null : null, lostSubReason: status === "lost" ? d.lostSubReason ?? null : null,
+      lostComment: status === "lost" ? d.lostComment ?? null : null,
+      timing: !ev.date || (!d.mqlDate && !d.createdAt) ? "unknown" : historical(d) ? "before_event" : "after_event",
+      via: contactDealIds.has(d.id) ? "contact" : "company",
+    };
+  });
+  dealRefs.sort(dealOrder);
 
   const name = [contact.firstName, contact.lastName].filter(Boolean).join(" ") || contact.email || contact.id;
   return {
@@ -248,8 +268,15 @@ export function computeLeadFact(
     touchDates: sinceElig.map((t) => t.timestamp),
     touchIds: sinceElig.map((t) => t.activityId),
     priorConversation, isUpcoming, preEventTouches, icpPriority,
-    attributedDeals, sqlDeals, dataQuality: dq, priority,
+    attributedDeals, sqlDeals, dealStatus: dealRefs[0]?.status ?? "none", deals: dealRefs, dataQuality: dq, priority,
   };
+}
+
+/** Most relevant first: open deals, then the most recently closed (lost or won), then the rest by created date. */
+export function dealOrder(a: DealRef, b: DealRef): number {
+  const rank = (d: DealRef) => (d.status === "open" ? 0 : 1);
+  if (rank(a) !== rank(b)) return rank(a) - rank(b);
+  return (b.closedAt ?? b.createdAt ?? "").localeCompare(a.closedAt ?? a.createdAt ?? "");
 }
 
 function uniqueDeals(deals: Deal[]): Deal[] {

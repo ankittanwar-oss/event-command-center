@@ -131,6 +131,8 @@ export async function loadDataset(db: Q = getPool()): Promise<Dataset> {
     dealById.set(r.id, {
       id: r.id, name: r.name, stage: r.stage, stageLabel: r.stage_label, isClosed: !!r.is_closed, isWon: !!r.is_won, ownerId: r.owner_id,
       amount: r.amount == null ? null : Number(r.amount), createdAt: ts(r.created_at), mqlDate: d(r.mql_date), sqlDate: d(r.sql_date), contactIds: [], companyIds: [],
+      pipelineLabel: r.pipeline_label ?? null, closeDate: ts(r.close_date), isClosedLost: r.is_closed_lost ?? null, closedLostAt: ts(r.closed_lost_at),
+      previousStageLabel: r.previous_stage_label ?? null, lostReason: r.lost_reason ?? null, lostSubReason: r.lost_sub_reason ?? null, lostComment: r.lost_comment ?? null,
     });
   }
   for (const r of dealContacts.rows) { const x = dealById.get(r.deal_id); if (x) { x.contactIds.push(r.contact_id); push(ds.dealsByContact, r.contact_id, x); } }

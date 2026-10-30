@@ -80,6 +80,7 @@ export const BUCKETS = {
   in_play: (f: LeadFact) => f.eligible && f.status === "in_play",
   unverifiable: (f: LeadFact) => f.eligible && f.status === "unverifiable",
   one_touch: (f: LeadFact) => f.eligible && f.touchesSinceEligibility === 1,
+  one_touch_due: (f: LeadFact) => f.eligible && f.status === "first_touch" && f.insufficientFollowUp && f.touchesSinceEligibility === 1,
   multi_week: (f: LeadFact) => f.eligible && f.multiWeek,
   sla_met: (f: LeadFact) => f.eligible && f.firstTouchSlaMet === true,
   sla_missed: (f: LeadFact) => f.eligible && f.firstTouchSlaMet === false,

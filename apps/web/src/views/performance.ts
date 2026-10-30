@@ -13,8 +13,8 @@ const METRICS: Array<{ key: string; label: string; kind: "n" | "pct" | "dec"; be
   { key: "slaCompliance", label: "First-touch SLA met", kind: "pct", better: true },
   { key: "avgTouchesFirst30", label: "Avg touches, first 30 days*", kind: "dec", better: true },
   { key: "multiWeekPct", label: "Multi-week follow-up*", kind: "pct", better: true },
-  { key: "opportunities", label: "Opportunities (≤90 days)", kind: "n", better: true },
-  { key: "sqls", label: "SQLs (≤90 days)", kind: "n", better: true },
+  { key: "opportunities", label: "MQLs (≤90 days)", kind: "n", better: true },
+  { key: "sqls", label: "SQLs (≤90 days, excl. pre-existing)", kind: "n", better: true },
 ];
 
 const val = (q: any, m: (typeof METRICS)[number]) => (m.kind === "pct" ? fmt.pct(q[m.key]) : m.kind === "dec" ? fmt.dec(q[m.key]) : fmt.n(q[m.key]));
