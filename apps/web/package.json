@@ -1,0 +1,8 @@
+{
+  "name": "@ecc/web",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Frontend (TypeScript, bundled with esbuild into apps/web/dist)",
+  "dependencies": { "@ecc/core": "1.0.0" }
+}

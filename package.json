@@ -1,0 +1,38 @@
+{
+  "name": "event-command-center",
+  "version": "1.0.0",
+  "private": true,
+  "description": "SpotDraft Events Command Center \u2013 HubSpot event follow-up reporting (web + sync worker)",
+  "type": "module",
+  "workspaces": [
+    "packages/core",
+    "apps/server",
+    "apps/web"
+  ],
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "build": "npm run build:web && npm run build:server",
+    "build:web": "node scripts/build-web.mjs",
+    "build:server": "node scripts/build-server.mjs",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "node --import tsx --test packages/core/test/*.test.ts apps/server/test/*.test.ts",
+    "start": "node apps/server/dist/index.js",
+    "start:web": "node apps/server/dist/index.js",
+    "start:worker": "node apps/server/dist/worker.js --cron",
+    "sync": "node apps/server/dist/worker.js",
+    "sync:full": "node apps/server/dist/worker.js --full",
+    "recompute": "node apps/server/dist/worker.js --recompute",
+    "migrate": "node apps/server/dist/migrate.js",
+    "dev:web": "node scripts/build-web.mjs --watch",
+    "dev:server": "tsx watch apps/server/src/index.ts",
+    "validate:extracts": "tsx scripts/validate-extracts.ts"
+  },
+  "devDependencies": {
+    "@types/node": "26.5.1",
+    "esbuild": "0.28.2",
+    "tsx": "4.23.13",
+    "typescript": "7.0.2"
+  }
+}
