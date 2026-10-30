@@ -17,6 +17,9 @@ export function getPool(): Pool {
       connectionTimeoutMillis: 15_000,
     });
     pool.on("error", (e: Error) => log.error("postgres pool error", { error: e.message }));
+    // A checked-out client that loses its connection emits "error" on the client itself; without a listener Node
+    // treats it as unhandled and the whole process exits.
+    pool.on("connect", (client: PoolClient) => { client.on("error", (e: Error) => log.error("postgres connection lost", { error: e.message })); });
   }
   return pool;
 }

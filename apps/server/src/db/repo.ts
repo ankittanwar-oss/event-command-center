@@ -16,10 +16,12 @@ export async function upsert(
   const update = names.filter((n) => !conflict.includes(n));
   const set = update.map((n) => `${n} = ${opts.updateExpr?.[n] ?? `EXCLUDED.${n}`}`);
   if (opts.touchSyncedAt !== false && !opts.doNothing) set.push("synced_at = now()");
-  const onConflict = opts.doNothing || !set.length ? "DO NOTHING" : `DO UPDATE SET ${set.join(", ")}`;
+  // Only rewrite rows whose values changed: unchanged rows produce no dead tuples and no WAL.
+  const changed = update.length ? ` WHERE (${update.map((n) => `${table}.${n}`).join(", ")}) IS DISTINCT FROM (${update.map((n) => `EXCLUDED.${n}`).join(", ")})` : "";
+  const onConflict = opts.doNothing || !set.length ? "DO NOTHING" : `DO UPDATE SET ${set.join(", ")}${opts.updateExpr ? "" : changed}`;
   let n = 0;
-  for (let i = 0; i < rows.length; i += 1000) {
-    const chunk = rows.slice(i, i + 1000);
+  for (let i = 0; i < rows.length; i += 500) {
+    const chunk = rows.slice(i, i + 500);
     const sql = `INSERT INTO ${table} (${names.join(", ")})
       SELECT ${names.join(", ")} FROM jsonb_to_recordset($1::jsonb) AS x(${columns.join(", ")})
       ON CONFLICT (${conflict.join(", ")}) ${onConflict}`;

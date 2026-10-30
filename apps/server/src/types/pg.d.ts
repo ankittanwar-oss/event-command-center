@@ -5,6 +5,7 @@ declare module "pg" {
   export interface PoolClient {
     query<R = any>(text: string, values?: unknown[]): Promise<QueryResult<R>>;
     release(err?: Error | boolean): void;
+    on(event: "error", listener: (err: Error) => void): this;
   }
   export interface PoolConfig {
     connectionString?: string;
@@ -19,6 +20,7 @@ declare module "pg" {
     connect(): Promise<PoolClient>;
     end(): Promise<void>;
     on(event: "error", listener: (err: Error) => void): this;
+    on(event: "connect", listener: (client: PoolClient) => void): this;
   }
   const pg: { Pool: typeof Pool };
   export default pg;

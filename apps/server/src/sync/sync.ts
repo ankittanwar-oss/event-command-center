@@ -23,6 +23,7 @@ export interface SyncResult { runId: number | null; status: "success" | "failed"
 export async function runSync(trigger: Trigger, opts: { forceFull?: boolean } = {}): Promise<SyncResult> {
   const pool = getPool();
   const lockClient = await pool.connect();
+  lockClient.on("error", (e: Error) => log.error("sync lock connection lost", { error: e.message }));
   let runId: number | null = null;
   try {
     const got = (await lockClient.query<{ ok: boolean }>("SELECT pg_try_advisory_lock($1) AS ok", [SYNC_LOCK])).rows[0]?.ok;
@@ -32,6 +33,9 @@ export async function runSync(trigger: Trigger, opts: { forceFull?: boolean } = 
       log.warn("sync skipped: another sync holds the lock", { trigger });
       return { runId: r.rows[0]?.id ?? null, status: "skipped" };
     }
+
+    // We hold the lock, so any run still marked "running" was interrupted (service restart, database restart).
+    await pool.query("UPDATE sync_runs SET status = 'failed', finished_at = now(), error = 'Interrupted (service or database restarted)' WHERE status = 'running'");
 
     const lastFull = (await pool.query<{ started_at: Date }>(
       "SELECT started_at FROM sync_runs WHERE mode = 'full' AND status = 'success' ORDER BY started_at DESC LIMIT 1")).rows[0]?.started_at;
@@ -160,13 +164,22 @@ async function syncAll(hs: HubSpotClient, rules: Rules, full: boolean, records: 
   const companyLinks: Array<[string, string]> = []; // [activity id, company id]
   const taskContactLinks: Array<[string, string]> = [];
   let companyLinksComplete = env.companyActivityAssociations;
+  // Company-level activity is only needed to spot "outreach logged on the company, not the contact" for leads that
+  // can be eligible (roster SDR + Hot/Warm). Reading it for every company is very large and adds nothing to the numbers.
+  // Oldest activity that can matter: 365 days before the earliest event in the window (prior-conversation check).
+  const activityCutoff = `${addDays(asOf, -(env.eventLookbackDays + 365))}T00:00:00.000Z`;
+  const hotWarm = new Set([...rules.temperature.hotValues, ...rules.temperature.warmValues].map((v) => v.toLowerCase()));
+  const activityCompanyIds = companies
+    .filter((c) => isRosterSdr(c.sdr_owner_id) && !!c.temperature_raw && hotWarm.has(c.temperature_raw.toLowerCase()))
+    .map((c) => c.id);
+  records.companies_for_activity = activityCompanyIds.length;
   for (const type of ACTIVITY_TYPES) {
     const byContact = await hs.associations("contacts", type, contactIds);
     const ids = new Set<string>();
     for (const [cid, list] of byContact) for (const id of list) { ids.add(id); contactLinks.push([`${type}:${id}`, cid]); if (type === "tasks") taskContactLinks.push([id, cid]); }
 
-    if (env.companyActivityAssociations && companyIds.length) {
-      const byCompany = await hs.associations("companies", type, companyIds);
+    if (env.companyActivityAssociations && activityCompanyIds.length) {
+      const byCompany = await hs.associations("companies", type, activityCompanyIds, 2000);
       let added = 0;
       for (const [coid, list] of byCompany) for (const id of list) {
         if (!ids.has(id)) {
@@ -179,7 +192,7 @@ async function syncAll(hs: HubSpotClient, rules: Rules, full: boolean, records: 
 
     const all = [...ids];
     const prefixed = all.map((id) => `${type}:${id}`);
-    const have = full ? new Set<string>() : await existingIds(db, "activities", prefixed);
+    const have = full ? new Set<string>() : new Set([...(await existingIds(db, "activities", prefixed)), ...(await existingIds(db, "activity_skips", prefixed))]);
     let toRead = all.filter((id) => !have.has(`${type}:${id}`));
     if (!full && (type === "tasks" || type === "meetings" || type === "calls")) {
       // statuses and outcomes change after creation: re-read open tasks and recent calls/meetings every run
@@ -189,7 +202,13 @@ async function syncAll(hs: HubSpotClient, rules: Rules, full: boolean, records: 
       toRead = [...new Set([...toRead, ...r.rows.map((x: { hs_id: string }) => x.hs_id)])];
     }
     const raw = await hs.batchRead(type, toRead, ACTIVITY_PROPERTIES[type]);
-    const rows = raw.map((r) => mapActivity(type as ActivityType, r)).filter((x): x is ActivityRow => !!x);
+    const mapped = raw.map((r) => mapActivity(type as ActivityType, r)).filter((x): x is ActivityRow => !!x);
+    // Activities older than the reporting window can never affect a number; only their ids are kept (so they are not
+    // re-read every run). This keeps the database small.
+    const rows = mapped.filter((a) => a.ts >= activityCutoff);
+    const skipped = mapped.filter((a) => a.ts < activityCutoff).map((a) => ({ id: a.id }));
+    await upsert(db, "activity_skips", ["id text"], skipped, ["id"], { doNothing: true });
+    records[`${type}_too_old`] = skipped.length;
     await upsert(db, "activities", ["id text", "object_type text", "hs_id text", "kind text", "ts timestamptz", "owner_id text", "direction text", "channel text", "status text", "title text"], rows as any, ["id"]);
     if (type === "tasks") {
       await upsert(db, "tasks", ["id text", "due_at timestamptz", "status text", "task_type text", "owner_id text", "subject text"], raw.map(mapTask) as any, ["id"]);
@@ -213,7 +232,7 @@ async function syncAll(hs: HubSpotClient, rules: Rules, full: boolean, records: 
   await tx(async (c) => {
     await replaceLinks(c, "activity_contacts", "contact_id", "activity_id", contactIds, contactLinks.filter((l) => storedActs.has(l[0])).map(([a, b]) => [b, a]));
     if (companyLinksComplete) {
-      await replaceLinks(c, "activity_companies", "company_id", "activity_id", companyIds, companyLinks.filter((l) => storedActs.has(l[0])).map(([a, b]) => [b, a]));
+      await replaceLinks(c, "activity_companies", "company_id", "activity_id", activityCompanyIds, companyLinks.filter((l) => storedActs.has(l[0])).map(([a, b]) => [b, a]));
     } else {
       await upsert(c, "activity_companies", ["activity_id text", "company_id text"], companyLinks.filter((l) => storedActs.has(l[0])).map(([a, b]) => ({ activity_id: a, company_id: b })), ["activity_id", "company_id"], { doNothing: true });
     }
