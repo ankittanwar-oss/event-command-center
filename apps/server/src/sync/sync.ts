@@ -9,6 +9,9 @@ import {
   attendedForEvent, stageInfoFromPipelines, mapActivity, mapCompany, mapContact, mapDeal, mapEvent, mapOwner, mapTask, type ActivityRow, type ActivityType,
 } from "../hubspot/mappers.js";
 import { loadRules } from "../rules.js";
+import { getSetting, setSetting } from "../db/repo.js";
+import { readAllTabs } from "../sheets/google.js";
+import { applySheet, parseTab, type SheetMerge, type SheetTab } from "../sheets/roundtables.js";
 
 const SYNC_LOCK = 778_001;
 
@@ -116,6 +119,10 @@ async function syncAll(hs: HubSpotClient, rules: Rules, full: boolean, records: 
   // 3. Event registrants (event → contact associations)
   const eventContacts = new Map<string, string[]>();
   for (const e of events) eventContacts.set(e.id, await hs.associationsOf(env.eventObjectType, e.id, "contacts"));
+
+  // 3b. Roundtable Google Sheet: registrations and attendance (source of truth for matched roundtables)
+  const sheetInfo = await roundtableSheet(hs, rules, events, eventContacts, records, warnings);
+
   const contactIds = [...new Set([...eventContacts.values()].flat())];
   records.registrations = [...eventContacts.values()].reduce((a, l) => a + l.length, 0);
 
@@ -133,11 +140,16 @@ async function syncAll(hs: HubSpotClient, rules: Rules, full: boolean, records: 
   const ecRows: Array<Record<string, unknown>> = [];
   for (const e of events) {
     for (const cid of eventContacts.get(e.id) ?? []) {
-      ecRows.push({ event_id: e.id, contact_id: cid, attended_at: attendedForEvent(e.event_date, contactById.get(cid)?.attended_date ?? null, rules) });
+      const sheet = sheetInfo.get(e.id);
+      ecRows.push({
+        event_id: e.id, contact_id: cid, attended_at: attendedForEvent(e.event_date, contactById.get(cid)?.attended_date ?? null, rules),
+        sheet_attended: sheet ? sheet.attended.get(cid) ?? null : null,
+        source: sheet ? (sheet.fromSheet.has(cid) ? (sheet.fromHubspot.has(cid) ? "both" : "sheet") : "hubspot") : "hubspot",
+      });
     }
   }
-  await upsert(db, "event_contacts", ["event_id text", "contact_id text", "attended_at date"], ecRows, ["event_id", "contact_id"], {
-    touchSyncedAt: false, updateExpr: { attended_at: "COALESCE(event_contacts.attended_at, EXCLUDED.attended_at)" },
+  await upsert(db, "event_contacts", ["event_id text", "contact_id text", "attended_at date", "sheet_attended boolean", "source text"], ecRows, ["event_id", "contact_id"], {
+    touchSyncedAt: false, updateExpr: { attended_at: "COALESCE(event_contacts.attended_at, EXCLUDED.attended_at)", sheet_attended: "EXCLUDED.sheet_attended", source: "EXCLUDED.source" },
   });
   await db.query("UPDATE event_contacts SET last_seen_at = now() WHERE event_id = ANY($1::text[])", [events.map((e) => e.id)]);
   // Registrants removed from an event in HubSpot are removed here too.
@@ -317,5 +329,60 @@ async function syncAll(hs: HubSpotClient, rules: Rules, full: boolean, records: 
     }
     records.duplicate_company_lost_deals = dupDealIds.length;
     if (dupCompanies.length) warnings.push(`${dupCompanies.length} duplicate company record(s) found with recent closed-lost deals (same name and SDR owner as an event account): ${dupCompanies.slice(0, 5).map((c) => c.name).join("; ")}. Consider merging them in HubSpot.`);
+  }
+}
+
+
+/**
+ * Read the roundtable sheet, match tabs to HubSpot roundtable events, resolve each row to a HubSpot contact
+ * (HS Link id, else exact email lookup), and – when authoritative – replace that event's registrant list.
+ * Never fails the sync: if the sheet cannot be read, the last successfully read copy is reused; with no copy,
+ * HubSpot registrations are used unchanged.
+ */
+async function roundtableSheet(
+  hs: HubSpotClient, rules: Rules, events: Array<{ id: string; name: string; event_date: string | null; category: string }>,
+  eventContacts: Map<string, string[]>, records: Record<string, number>, warnings: string[],
+): Promise<Map<string, SheetMerge>> {
+  if (!env.googleServiceAccountJson) return new Map();
+  const before = new Map([...eventContacts].map(([k, v]) => [k, [...v]]));
+  try {
+    let tabs: SheetTab[];
+    let readError: string | null = null;
+    try {
+      tabs = (await readAllTabs(env.googleServiceAccountJson, env.roundtableSheetId)).map((t) => parseTab(t.title, t.rows));
+      await setSetting("roundtable_sheet_cache", { readAt: new Date().toISOString(), tabs });
+    } catch (e) {
+      readError = errMessage(e);
+      const cache = await getSetting<{ readAt: string; tabs: SheetTab[] }>("roundtable_sheet_cache");
+      warnings.push(`Roundtable sheet could not be read (${readError}).${cache ? ` Using the copy read at ${cache.readAt}.` : " HubSpot registrations used instead."}`);
+      if (!cache) { await setSetting("roundtable_sheet_report", { readAt: null, error: readError, tabs: [], unmatchedTabs: [] }); return new Map(); }
+      tabs = cache.tabs;
+    }
+
+    // rows without an HS link -> exact HubSpot contact lookup by email
+    const needEmail = [...new Set(tabs.flatMap((t) => t.rows.filter((r) => !r.contactId && r.email).map((r) => r.email!)))];
+    const byEmail = new Map<string, string>();
+    for (let i = 0; i < needEmail.length; i += 100) {
+      const found = await hs.searchAll("contacts", { filterGroups: [{ filters: [{ propertyName: "email", operator: "IN", values: needEmail.slice(i, i + 100) }] }], properties: ["email"] });
+      for (const c of found) if (c.properties?.email) byEmail.set(String(c.properties.email).toLowerCase(), String(c.id));
+    }
+
+    const r = applySheet(tabs, events, eventContacts, byEmail, rules.roundtableSheet.authoritative);
+    records.sheet_tabs_matched = r.report.length;
+    records.sheet_rows = r.rows;
+    records.sheet_registrants_added = r.added;
+    if (r.unmatchedTabs.length) warnings.push(`Roundtable sheet tabs not matched to a HubSpot event: ${r.unmatchedTabs.join("; ")}`);
+    const unresolved = r.report.reduce((a: number, t: any) => a + t.unresolved.length, 0);
+    if (unresolved) warnings.push(`${unresolved} roundtable sheet row(s) could not be matched to a HubSpot contact (no HS link and email not found)`);
+    await setSetting("roundtable_sheet_report", {
+      readAt: readError ? null : new Date().toISOString(), error: readError, authoritative: rules.roundtableSheet.authoritative,
+      tabs: r.report, unmatchedTabs: r.unmatchedTabs,
+    });
+    return r.merged;
+  } catch (e) {
+    // anything unexpected: restore HubSpot registrants and carry on with the sync
+    for (const [k, v] of before) eventContacts.set(k, v);
+    warnings.push(`Roundtable sheet skipped: ${errMessage(e)}`);
+    return new Map();
   }
 }

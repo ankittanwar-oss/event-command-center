@@ -5,7 +5,7 @@ import { mergeRules, nextAction, RISK_LABEL, riskOf, rosterById, touchKind, type
 import { env, today } from "../env.js";
 import { errMessage, log } from "../log.js";
 import { getPool } from "../db/pool.js";
-import { setSetting } from "../db/repo.js";
+import { getSetting, setSetting } from "../db/repo.js";
 import { loadRules, validateRules } from "../rules.js";
 import { recomputeFacts, runSync } from "../sync/sync.js";
 import { getSnapshot, invalidateSnapshot } from "./cache.js";
@@ -70,6 +70,16 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL) {
         return send(res, 200, { runs: r.rows, freshness: await freshness(), counts: counts.rows[0], computedAt: s.computedAt, asOf: s.asOf });
       }
       case "/api/admin/rules": return send(res, 200, { effective: await loadRules(), snapshot: rules });
+      case "/api/roundtable-sheet": {
+        // Reconciliation of the roundtable Google Sheet with HubSpot (written by the sync). No credentials returned.
+        let serviceAccountEmail: string | null = null;
+        try { serviceAccountEmail = env.googleServiceAccountJson ? JSON.parse(env.googleServiceAccountJson).client_email ?? null : null; } catch { serviceAccountEmail = null; }
+        return send(res, 200, {
+          configured: !!env.googleServiceAccountJson, serviceAccountEmail, sheetId: env.roundtableSheetId,
+          sheetUrl: `https://docs.google.com/spreadsheets/d/${env.roundtableSheetId}/edit`,
+          report: await getSetting("roundtable_sheet_report"),
+        });
+      }
       case "/api/lookup": {
         // Find every lead record for a contact (email, name or HubSpot id) – used to audit individual cases.
         const term = (q.get("q") || "").trim().toLowerCase();

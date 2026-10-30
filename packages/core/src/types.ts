@@ -57,6 +57,8 @@ export interface EventContact {
   eventId: string;
   contactId: string;
   attendedAt: string | null;          // attendance date captured while it matched THIS event (survives later overwrites)
+  sheetAttended?: boolean | null;     // roundtable Google Sheet "Attended" Yes/No (authoritative when present)
+  source?: "hubspot" | "sheet" | "both" | null;
 }
 
 export type ActivityKind = "EMAIL" | "INCOMING_EMAIL" | "CALL" | "MEETING" | "LINKEDIN" | "TASK" | "OTHER";

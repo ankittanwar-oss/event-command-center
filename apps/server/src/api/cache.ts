@@ -1,5 +1,5 @@
 import type { LeadFact, Rules } from "@ecc/core";
-import { DEFAULT_RULES } from "@ecc/core";
+import { DEFAULT_RULES, mergeRules } from "@ecc/core";
 import { getPool } from "../db/pool.js";
 import { loadLeadFacts } from "../db/repo.js";
 
@@ -21,7 +21,8 @@ export async function getSnapshot(): Promise<Snapshot> {
         const { facts, meta } = await loadLeadFacts();
         snap = {
           facts, computedAt: at, asOf: meta?.as_of_date ? new Date(meta.as_of_date).toISOString().slice(0, 10) : null,
-          rules: (meta?.rules as Rules) ?? DEFAULT_RULES, runId: meta?.run_id ?? null,
+          // Rules saved with an older snapshot may lack settings added later: fill gaps from the current defaults.
+          rules: mergeRules(DEFAULT_RULES, meta?.rules ?? {}), runId: meta?.run_id ?? null,
         };
       }
       lastCheck = Date.now();

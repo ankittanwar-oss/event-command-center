@@ -221,4 +221,20 @@ describe("API views", () => {
     assert.equal(o.dealContext.lost, 1);
     assert.equal(o.dealContext.lostLast90, 1);
   });
+  test("a snapshot saved with older rules (missing newer settings) still renders once merged with defaults", async () => {
+    const { mergeRules } = await import("@ecc/core");
+    const old: any = structuredClone(DEFAULT_RULES);
+    delete old.touchTarget; delete old.recentlyClosedLostDays; delete old.matchDuplicateCompanies; delete old.roundtableSheet;
+    const facts = computeLeadFacts(dataset(), DEFAULT_RULES, "2026-10-30");
+    const merged = mergeRules(DEFAULT_RULES, old);
+    for (const fn of [() => views.overview(facts, new URLSearchParams(""), "2026-10-30", merged), () => views.depth(facts, new URLSearchParams(""), "2026-10-30", merged),
+      () => views.sdrs(facts, new URLSearchParams(""), "2026-10-30", merged), () => views.accounts(facts, new URLSearchParams(""), "2026-10-30", merged),
+      () => views.events(facts, new URLSearchParams(""), "2026-10-30", merged), () => views.leads(facts, new URLSearchParams(""), "2026-10-30", merged)]) assert.doesNotThrow(fn);
+  });
+  test("facts computed before update 3 (no touch log / deal fields) still render", () => {
+    const facts = computeLeadFacts(dataset(), DEFAULT_RULES, "2026-10-30").map((f) => { const o: any = { ...f }; delete o.allTouchDates; delete o.allTouchIds; delete o.deals; delete o.dealStatus; delete o.recentlyLost; return o; });
+    assert.doesNotThrow(() => views.overview(facts, new URLSearchParams(""), "2026-10-30", DEFAULT_RULES));
+    assert.doesNotThrow(() => views.depth(facts, new URLSearchParams("window=allocation"), "2026-10-30", DEFAULT_RULES));
+    assert.doesNotThrow(() => views.accounts(facts, new URLSearchParams(""), "2026-10-30", DEFAULT_RULES));
+  });
 });

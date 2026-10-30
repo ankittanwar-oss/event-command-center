@@ -40,6 +40,11 @@ export const env = {
   dealMqlProperty: str("HUBSPOT_DEAL_MQL_PROPERTY", "hs_v2_date_entered_144930627"),
   dealSqlProperty: str("HUBSPOT_DEAL_SQL_PROPERTY", "became_qualified_to_buy__sales_pipeline_"),
   staleAfterHours: num("STALE_AFTER_HOURS", 5),
+  /** The web service runs the HubSpot sync itself every N minutes (0 = off, e.g. when a separate cron worker exists). */
+  syncIntervalMinutes: num("SYNC_INTERVAL_MINUTES", 120),
+  // Roundtable Google Sheet (read-only). The key is only ever read on the server.
+  get googleServiceAccountJson() { return process.env.GOOGLE_SERVICE_ACCOUNT_JSON || ""; },
+  roundtableSheetId: str("ROUNDTABLE_SHEET_ID", "1Cpf0eLWVt37ic4Qa2jC5CdG5J2g-4QCcgvUEtmBQId4"),
   rulesJson: process.env.RULES_JSON || "",
   timezone: str("REPORTING_TIMEZONE", "America/New_York"),
   logLevel: str("LOG_LEVEL", "info"),

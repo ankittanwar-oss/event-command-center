@@ -51,6 +51,9 @@ export function expectedTouches(ageDays: number, rule: CadenceRule): number {
 
 export function attendanceFor(ec: EventContact, contact: Contact | undefined, ev: EventRecord, eventHasAttendance: boolean, rules: Rules, today: string): AttendanceStatus {
   if (!ev.date || ev.date > today) return "unknown";
+  // The roundtable sheet is the source of truth for attendance when it has a Yes/No for this person.
+  if (ec.sheetAttended === true) return "attended";
+  if (ec.sheetAttended === false) return "no_show";
   const inWindow = (d: string | null) => {
     if (!d) return false;
     const diff = daysBetween(ev.date!, d);

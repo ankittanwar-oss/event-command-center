@@ -58,7 +58,7 @@ export async function loadDataset(db: Q = getPool()): Promise<Dataset> {
     db.query("SELECT * FROM companies"),
     db.query("SELECT * FROM contacts WHERE id IN (SELECT contact_id FROM event_contacts)"),
     db.query("SELECT * FROM events"),
-    db.query("SELECT event_id, contact_id, attended_at FROM event_contacts"),
+    db.query("SELECT event_id, contact_id, attended_at, sheet_attended, source FROM event_contacts"),
     db.query("SELECT id, object_type, kind, ts, owner_id, direction, channel, status, title FROM activities"),
     db.query("SELECT activity_id, contact_id FROM activity_contacts"),
     db.query("SELECT activity_id, company_id FROM activity_companies"),
@@ -93,7 +93,7 @@ export async function loadDataset(db: Q = getPool()): Promise<Dataset> {
     const e: EventRecord = { id: r.id, name: r.name, date: d(r.event_date), eventType: r.event_type, category: r.category, categorySource: r.category_source ?? "none" };
     ds.events.set(e.id, e);
   }
-  ds.eventContacts = ecs.rows.map((r: any): EventContact => ({ eventId: r.event_id, contactId: r.contact_id, attendedAt: d(r.attended_at) }));
+  ds.eventContacts = ecs.rows.map((r: any): EventContact => ({ eventId: r.event_id, contactId: r.contact_id, attendedAt: d(r.attended_at), sheetAttended: r.sheet_attended ?? null, source: r.source ?? null }));
 
   const actById = new Map<string, Activity>();
   for (const r of acts.rows) {

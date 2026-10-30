@@ -1,4 +1,5 @@
 import { api } from "../api.js";
+import { sheetSection } from "./sheet.js";
 import { openLead } from "../drawer.js";
 import { buildHash, filterParams, type Route } from "../state.js";
 import { fmt, h, hsLink, table } from "../ui.js";
@@ -18,10 +19,11 @@ const FLAG_LABEL: Record<string, string> = {
 
 export async function qualityView(route: Route): Promise<HTMLElement> {
   const flag = route.extra.get("flag") ?? "";
-  const d = await api("data-quality", { ...filterParams(route.filters), flag });
+  const [d, sheet] = await Promise.all([api("data-quality", { ...filterParams(route.filters), flag }), sheetSection().catch(() => h("div"))]);
   const flags = Object.entries(d.flags as Record<string, number>).sort((a, b) => b[1] - a[1]);
   return h("div", null,
     h("div", { class: "banner note" }, "Region and SDR filters are not applied here: data issues often mean the region or SDR is unknown."),
+    sheet,
     h("div", { class: "grid2" },
       h("div", null,
         h("h2", null, "Issues", h("span", { class: "sub" }, `${fmt.n(d.totalLeads)} registrations checked`)),
