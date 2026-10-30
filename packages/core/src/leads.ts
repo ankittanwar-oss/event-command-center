@@ -82,7 +82,8 @@ export function computeLeadFacts(ds: Dataset, rules: Rules, today: string): Lead
     const ev = ds.events.get(ec.eventId);
     const contact = ds.contacts.get(ec.contactId);
     if (!ev || !contact) continue;
-    facts.push(computeLeadFact(ds, ev, contact, ec, withAttendance.has(ev.id), rules, today));
+    const f = computeLeadFact(ds, ev, contact, ec, withAttendance.has(ev.id), rules, today);
+    if (!isExcludedCompany(f, rules)) facts.push(f);
   }
   return facts;
 }
@@ -300,6 +301,14 @@ export function computeLeadFact(
     allTouchDates: touches.map((t) => t.timestamp), allTouchIds: touches.map((t) => t.activityId),
     dataQuality: dq, priority,
   };
+}
+
+/** True when the lead's company is on the admin exclusion list (by HubSpot company id or normalised name). */
+export function isExcludedCompany(f: Pick<LeadFact, "companyId" | "companyName">, rules: Rules): boolean {
+  const list = rules.excludedCompanies ?? [];
+  if (!list.length) return false;
+  const name = normalizeCompanyName(f.companyName);
+  return list.some((x) => (f.companyId && x.trim() === f.companyId) || (!!name && normalizeCompanyName(x) === name));
 }
 
 /** Normalised company name for duplicate-record matching ("The Channel Company, Inc." -> "channel company"). */

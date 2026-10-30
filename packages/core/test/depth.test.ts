@@ -33,7 +33,7 @@ describe("recently closed lost: grey, no SLA", () => {
       contacts: [contact({ companyId: "44450868483" })],
       deals: [lostOn("2026-08-27T18:33:21.127Z", { id: "50152027684", companyIds: ["42702800922"] })],
     });
-    const f = computeLeadFacts(ds, R, TODAY)[0]!;
+    const f = computeLeadFacts(ds, rules({ excludedCompanies: [] }), TODAY)[0]!;
     assert.equal(f.status, "recently_lost");
     assert.equal(f.recentlyLost!.via, "duplicate_company");
     assert.equal(f.deals!.find((d) => d.id === "50152027684")!.via, "duplicate_company");
@@ -96,5 +96,20 @@ describe("touch depth", () => {
     assert.equal(targetStatus(f, 1, R), "in_progress");
     assert.equal(targetStatus(f, 6, R), "achieved");
     assert.equal(targetStatus(f, 1, rules({ touchTarget: { windowDays: 21 } })), "behind");
+  });
+});
+
+describe("excluded companies", () => {
+  test("The Channel Company (any of its duplicate records) is removed from all counts; others stay", async () => {
+    const { isExcludedCompany, DEFAULT_RULES: D, mergeRules } = await import("../src/index.js");
+    const ds = dataset({
+      companies: [company({ id: "44450868483", name: "The Channel Company" }), company({ id: "42702800922", name: "The Channel Company, Inc." }), company({ id: "co3", name: "Channel Partners" })],
+      contacts: [contact({ id: "a", companyId: "44450868483" }), contact({ id: "b", companyId: "42702800922" }), contact({ id: "c", companyId: "co3" })],
+      links: [["e1", "a"], ["e1", "b"], ["e1", "c"]],
+    });
+    const facts = computeLeadFacts(ds, R, TODAY);
+    assert.deepEqual(facts.map((f) => f.contactId), ["c"]);
+    assert.equal(isExcludedCompany({ companyId: "42702800922", companyName: null }, mergeRules(D, { excludedCompanies: ["42702800922"] })), true);
+    assert.equal(computeLeadFacts(ds, rules({ excludedCompanies: [] }), TODAY).length, 3);
   });
 });

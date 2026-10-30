@@ -1,5 +1,5 @@
 import type { LeadFact, Rules } from "@ecc/core";
-import { DEFAULT_RULES, mergeRules } from "@ecc/core";
+import { DEFAULT_RULES, isExcludedCompany, mergeRules } from "@ecc/core";
 import { getPool } from "../db/pool.js";
 import { loadLeadFacts } from "../db/repo.js";
 
@@ -18,11 +18,14 @@ export async function getSnapshot(): Promise<Snapshot> {
       const r = await getPool().query<{ computed_at: Date }>("SELECT computed_at FROM facts_meta WHERE id = 1");
       const at = r.rows[0]?.computed_at ? new Date(r.rows[0].computed_at).toISOString() : null;
       if (at && at !== snap.computedAt) {
-        const { facts, meta } = await loadLeadFacts();
+        const { facts: all, meta } = await loadLeadFacts();
+        // Rules saved with an older snapshot may lack settings added later: fill gaps from the current defaults.
+        const rules = mergeRules(DEFAULT_RULES, meta?.rules ?? {});
+        // Companies on the exclusion list are removed before anything is counted or shown.
+        const facts = all.filter((f) => !isExcludedCompany(f, rules));
         snap = {
           facts, computedAt: at, asOf: meta?.as_of_date ? new Date(meta.as_of_date).toISOString().slice(0, 10) : null,
-          // Rules saved with an older snapshot may lack settings added later: fill gaps from the current defaults.
-          rules: mergeRules(DEFAULT_RULES, meta?.rules ?? {}), runId: meta?.run_id ?? null,
+          rules, runId: meta?.run_id ?? null,
         };
       }
       lastCheck = Date.now();
