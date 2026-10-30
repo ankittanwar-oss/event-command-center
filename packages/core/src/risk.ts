@@ -46,7 +46,11 @@ export function riskOf(f: LeadFact, rules: Rules): { level: RiskLevel; reason: s
     case "active":
       return { level: "healthy", reason: f.statusReason };
     case "in_play":
-      return { level: "healthy", reason: f.inPlayReason ?? "In play" };
+      // In play only counts as healthy when the SDR has actually worked the lead. An open deal, meeting or reply
+      // with no qualifying SDR touch is shown grey, so "healthy" always means real follow-up happened.
+      return f.touchesSinceEligibility > 0
+        ? { level: "healthy", reason: f.inPlayReason ?? "In play" }
+        : { level: "neutral", reason: `${f.inPlayReason ?? "In play"}, but no SDR touch logged` };
     case "unverifiable":
       return { level: "neutral", reason: "Activity cannot be verified on the contact" };
     case "recently_lost":

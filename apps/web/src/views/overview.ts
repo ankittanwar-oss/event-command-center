@@ -7,7 +7,7 @@ const LEVELS: Risk[] = ["critical", "at_risk", "healthy", "neutral"];
 const LEVEL_HINT: Record<Risk, string> = {
   critical: "SLA breached with no outreach, or follow-up stalled",
   at_risk: "First touch due today, or below expected cadence",
-  healthy: "Actively worked across weeks, or in play",
+  healthy: "Actively worked across weeks, or in play after real SDR touches",
   neutral: "Inside SLA window, next touch not yet due, unverified, or recently closed lost",
 };
 
@@ -21,6 +21,29 @@ export async function overviewView(route: Route): Promise<HTMLElement> {
   // ---- 1. Narrative
   const verdict: Risk = risk.critical > 0 ? "critical" : risk.at_risk > 0 ? "at_risk" : risk.eligible ? "healthy" : "neutral";
   const narrative = h("div", { class: `narrative ${RISK[verdict].cls}` }, h("span", { class: "nicon", "aria-hidden": "true" }, RISK[verdict].icon), h("p", null, d.narrative));
+
+  // ---- 1b. Follow-up depth headline: are leads getting more than one touch?
+  const sdrName = f.sdr ? d.sdrs.find((x: any) => x.ownerId === f.sdr)?.name ?? null : null;
+  const hm = (t: any) => ({ eligible: t.eligible, multi: t.multiTouch?.count ?? 0, one: t.oneTouch?.count ?? 0, none: t.untouched?.count ?? 0 });
+  const H = hm(d.hot), W = hm(d.warm);
+  const T = { eligible: H.eligible + W.eligible, multi: H.multi + W.multi, one: H.one + W.one, none: H.none + W.none };
+  const pctTxt = (n: number, of: number) => (of ? `${Math.round((n / of) * 100)}%` : "–");
+  const depthCol = (label: string, x: typeof T, temp?: "Hot" | "Warm") => {
+    const p = temp ? { temperature: temp } : {};
+    const cell = (cls: string, n: number, lab: string, bucket: string, hint: string) =>
+      h("button", { class: `dh-cell ${cls}`, onclick: () => open(bucket, p, `${label}: ${lab}`), title: hint },
+        h("span", { class: "dv" }, fmt.n(n)), h("span", { class: "dl" }, lab), h("span", { class: "dpc" }, `${pctTxt(n, x.eligible)} of ${fmt.n(x.eligible)}`));
+    return h("div", { class: "dh-col" },
+      h("div", { class: "dh-head" }, temp ? h("span", { class: `pill ${temp === "Hot" ? "hot" : "warm"}` }, temp) : h("b", null, "All"), h("span", { class: "muted" }, ` ${fmt.n(x.eligible)} eligible leads`)),
+      h("div", { class: "dh-row" },
+        cell("ok", x.multi, "Multi-touch (2+)", "multi_touch", "Two or more qualifying SDR touches (email, call or LinkedIn) since the lead became eligible"),
+        cell("warnr", x.one, "One touch only", "one_touch", "Exactly one qualifying SDR touch"),
+        cell("neu", x.none, "No touch yet", "untouched", "No qualifying SDR touch since the lead became eligible (includes leads still inside their first-touch window)")));
+  };
+  const depthHead = h("div", { class: "card dh" },
+    h("div", { class: "hd" }, h("span", { class: "t" }, sdrName ? `${sdrName}: follow-up depth` : "Follow-up depth"),
+      h("span", { class: "muted", style: "margin-left:auto" }, "Qualifying SDR touches since each lead became eligible · click a number for the leads")),
+    h("div", { class: "dh-grid" }, depthCol("Hot", H, "Hot"), depthCol("Warm", W, "Warm"), depthCol("All", T)));
 
   // ---- 2. Health summary (mutually exclusive; totals reconcile to eligible)
   const tile = (level: Risk) => h("button", { class: `htile ${RISK[level].cls}`, onclick: () => open(`risk_${level}`, {}, `${RISK[level].label} leads`), title: LEVEL_HINT[level] },
@@ -83,7 +106,8 @@ export async function overviewView(route: Route): Promise<HTMLElement> {
           row("Follow-up stalled", "No touch beyond the stall threshold", t.stalled, "critical"),
           row("Insufficient follow-up", "Touched, but below expected cadence for its age", t.insufficient, "at_risk"),
           row("Actively worked", "Meeting cadence across multiple weeks", t.active, "healthy"),
-          row("Completed / in play", "Meeting, reply, open deal or disqualified", t.inPlay, "healthy"),
+          t.inPlayTouched ? row("In play, worked by SDR", "Meeting, reply, open deal or DQ, after SDR touches", t.inPlayTouched, "healthy") : row("Completed / in play", "Meeting, reply, open deal or disqualified", t.inPlay, "healthy"),
+          t.inPlayUntouched ? row("In play, no SDR touch", "Open deal, meeting, reply or DQ, but the SDR has not logged a touch", t.inPlayUntouched, "neutral") : null,
           row("Unable to verify", "Outreach logged on the company, not the contact", t.unverifiable, "neutral"),
           t.recentlyLost ? row("Recently closed lost", `Account closed lost recently; no SLA`, t.recentlyLost, "neutral") : null,
         )));
@@ -146,6 +170,7 @@ export async function overviewView(route: Route): Promise<HTMLElement> {
 
   return h("div", null,
     narrative,
+    depthHead,
     summary,
     h("h2", null, "Where leadership should focus", h("span", { class: "sub" }, "Verified gaps, ordered by severity, temperature and volume · click to see the records")),
     focus,

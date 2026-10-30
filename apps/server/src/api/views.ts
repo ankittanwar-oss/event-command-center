@@ -39,7 +39,8 @@ export function filtered(facts: LeadFact[], q: URLSearchParams, today: string, o
 /** Adds the presentation-only risk level to a lead record. */
 function withRisk(f: LeadFact, rules: Rules) {
   const r = riskOf(f, rules);
-  return { ...f, nextAction: nextAction(f, rules), statusLabel: STATUS_LABEL[f.status], risk: r?.level ?? null, riskLabel: r ? RISK_LABEL[r.level] : null, riskReason: r?.reason ?? null };
+  const label = f.status === "in_play" && f.touchesSinceEligibility === 0 ? "In play – no SDR touch" : STATUS_LABEL[f.status];
+  return { ...f, nextAction: nextAction(f, rules), statusLabel: label, risk: r?.level ?? null, riskLabel: r ? RISK_LABEL[r.level] : null, riskReason: r?.reason ?? null };
 }
 
 /** Bucket predicate including the risk buckets (risk_critical, risk_at_risk, risk_healthy, risk_neutral). */
@@ -172,7 +173,7 @@ export function accounts(facts: LeadFact[], q: URLSearchParams, today: string, r
       contacts: a.contacts.map((c) => ({
         risk: riskOf(c, rules)?.level ?? null, riskReason: riskOf(c, rules)?.reason ?? null,
         contactId: c.contactId, contactName: c.contactName, contactEmail: c.contactEmail, jobTitle: c.jobTitle, eventId: c.eventId, eventName: c.eventName,
-        eventDate: c.eventDate, temperature: c.temperature, status: c.status, statusLabel: STATUS_LABEL[c.status], statusReason: c.statusReason,
+        eventDate: c.eventDate, temperature: c.temperature, status: c.status, statusLabel: c.status === "in_play" && c.touchesSinceEligibility === 0 ? "In play – no SDR touch" : STATUS_LABEL[c.status], statusReason: c.statusReason,
         touches: c.touchesSinceEligibility, lastTouchAt: c.lastTouchAt, nextTaskDue: c.nextTaskDue, attendance: c.attendance, nextAction: nextAction(c, rules),
       })),
     })),

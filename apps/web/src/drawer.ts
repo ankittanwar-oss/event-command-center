@@ -31,6 +31,7 @@ export const BUCKET_LABEL: Record<string, string> = {
   in_play: "Completed / in play", unverifiable: "Unable to verify", recently_lost: "Recently closed lost", one_touch: "One touch only", multi_week: "Multi-week follow-up",
   sla_met: "First-touch SLA met", sla_missed: "First-touch SLA missed", attention: "Needs attention", no_next_step: "No next step scheduled",
   one_touch_due: "One touch only, more outreach due",
+  multi_touch: "Multi-touch (2+ touches)", untouched: "No touch yet", in_play_touched: "In play, worked by SDR", in_play_untouched: "In play, no SDR touch",
   risk_critical: "Critical", risk_at_risk: "At risk", risk_healthy: "Healthy", risk_neutral: "Not yet due / unverified",
   ineligible: "Not eligible", registered: "Registrations", attended: "Attended", no_show: "Did not attend", attendance_unknown: "Attendance unknown",
 };

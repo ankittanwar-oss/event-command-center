@@ -81,6 +81,10 @@ export const BUCKETS = {
   unverifiable: (f: LeadFact) => f.eligible && f.status === "unverifiable",
   recently_lost: (f: LeadFact) => f.eligible && f.status === "recently_lost",
   one_touch: (f: LeadFact) => f.eligible && f.touchesSinceEligibility === 1,
+  multi_touch: (f: LeadFact) => f.eligible && f.touchesSinceEligibility >= 2,
+  untouched: (f: LeadFact) => f.eligible && f.touchesSinceEligibility === 0,
+  in_play_touched: (f: LeadFact) => f.eligible && f.status === "in_play" && f.touchesSinceEligibility > 0,
+  in_play_untouched: (f: LeadFact) => f.eligible && f.status === "in_play" && f.touchesSinceEligibility === 0,
   one_touch_due: (f: LeadFact) => f.eligible && f.status === "first_touch" && f.insufficientFollowUp && f.touchesSinceEligibility === 1,
   multi_week: (f: LeadFact) => f.eligible && f.multiWeek,
   sla_met: (f: LeadFact) => f.eligible && f.firstTouchSlaMet === true,
@@ -128,6 +132,11 @@ export function temperatureSummary(rows: LeadFact[], temp: Temperature) {
     inPlay: metric(r, "in_play"),
     unverifiable: metric(r, "unverifiable"),
     recentlyLost: metric(r, "recently_lost"),
+    multiTouch: metric(r, "multi_touch"),
+    oneTouch: metric(r, "one_touch"),
+    untouched: metric(r, "untouched"),
+    inPlayTouched: metric(r, "in_play_touched"),
+    inPlayUntouched: metric(r, "in_play_untouched"),
   };
 }
 
