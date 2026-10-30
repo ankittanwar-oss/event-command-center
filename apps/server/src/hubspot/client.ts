@@ -125,22 +125,22 @@ export class HubSpotClient {
    * Association ids from many records to one object type (v4 batch API, 1,000 inputs per request).
    * Records with more than one page of associations are completed with the per-record endpoint.
    */
-  async associations(fromType: string, toType: string, ids: string[]): Promise<Map<string, string[]>> {
+  async associations(fromType: string, toType: string, ids: string[], maxPerRecord = 5000): Promise<Map<string, string[]>> {
     const out = new Map<string, string[]>();
     for (let i = 0; i < ids.length; i += 1000) {
       const chunk = ids.slice(i, i + 1000);
       const r = await this.request<any>("POST", `/crm/v4/associations/${fromType}/${toType}/batch/read`, { inputs: chunk.map((id) => ({ id })) });
       for (const row of r.results ?? []) {
         const from = String(row.from?.id);
+        if (row.paging?.next?.after) {
+          // The batch endpoint's paging cursor is NOT valid for the per-record endpoint (HubSpot returns 400),
+          // so records with more associations than one batch page are re-read from the start, one record at a time.
+          out.set(from, [...(out.get(from) ?? []), ...(await this.associationsOf(fromType, from, toType, maxPerRecord))]);
+          continue;
+        }
         const list = out.get(from) ?? [];
         for (const t of row.to ?? []) list.push(String(t.toObjectId));
         out.set(from, list);
-        let after: string | undefined = row.paging?.next?.after;
-        while (after) {
-          const page = await this.request<any>("GET", `/crm/v4/objects/${fromType}/${from}/associations/${toType}?limit=500&after=${encodeURIComponent(after)}`);
-          for (const t of page.results ?? []) list.push(String(t.toObjectId));
-          after = page.paging?.next?.after;
-        }
       }
     }
     for (const [k, v] of out) out.set(k, [...new Set(v)]);
@@ -148,7 +148,7 @@ export class HubSpotClient {
   }
 
   /** All associations for one record (used for event -> contacts, which can exceed batch page sizes). */
-  async associationsOf(fromType: string, id: string, toType: string): Promise<string[]> {
+  async associationsOf(fromType: string, id: string, toType: string, max = Number.POSITIVE_INFINITY): Promise<string[]> {
     const out: string[] = [];
     let after: string | undefined;
     do {
@@ -157,6 +157,7 @@ export class HubSpotClient {
       const r = await this.request<any>("GET", `/crm/v4/objects/${fromType}/${id}/associations/${toType}?${q}`);
       for (const t of r.results ?? []) out.push(String(t.toObjectId));
       after = r.paging?.next?.after;
+      if (out.length >= max) { log.warn("association list capped", { fromType, id, toType, max }); break; }
     } while (after);
     return [...new Set(out)];
   }
