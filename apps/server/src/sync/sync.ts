@@ -1,4 +1,4 @@
-import { addDays, computeLeadFacts, isRosterSdr, type Rules } from "@ecc/core";
+import { addDays, computeLeadFacts, isRosterSdr, normalizeCompanyName, type Rules } from "@ecc/core";
 import { env, today } from "../env.js";
 import { errMessage, log } from "../log.js";
 import { getPool, tx } from "../db/pool.js";
@@ -276,4 +276,46 @@ async function syncAll(hs: HubSpotClient, rules: Rules, full: boolean, records: 
     for (const [coid, list] of dealsByCompany) for (const did of list) if (storedDeals.has(did)) dco.push([coid, did]);
     await replaceLinks(c, "deal_companies", "company_id", "deal_id", companyIds, dco);
   });
+
+  // 9. Recently closed-lost deals on DUPLICATE company records: a company with the same normalised name and the same
+  //    SDR owner as a registrant's company (e.g. two HubSpot records for "The Channel Company"). Only those deals and
+  //    companies are stored; they feed "Recently closed lost" and deal-history context, never attribution.
+  if (rules.recentlyClosedLostDays > 0 && rules.matchDuplicateCompanies) {
+    const since = String(Date.parse(`${addDays(asOf, -rules.recentlyClosedLostDays)}T00:00:00Z`));
+    const lost = await hs.searchAll("deals", {
+      filterGroups: [{ filters: [{ propertyName: "hs_is_closed_lost", operator: "EQ", value: "true" }, { propertyName: "closedate", operator: "GTE", value: since }] }],
+      properties: ["dealname"],
+    });
+    const newLost = lost.map((r) => String(r.id)).filter((id) => !storedDeals.has(id));
+    const lostCompanies = newLost.length ? await hs.associations("deals", "companies", newLost) : new Map<string, string[]>();
+    const registrantKeys = new Set(companies.filter((c) => c.sdr_owner_id).map((c) => `${normalizeCompanyName(c.name)}|${c.sdr_owner_id}`));
+    const known = new Set(companyIds);
+    const candidateIds = [...new Set([...lostCompanies.values()].flat())].filter((id) => !known.has(id));
+    const candidates = candidateIds.length ? (await hs.batchRead("companies", candidateIds, COMPANY_PROPERTIES.includes(rules.temperature.property) ? COMPANY_PROPERTIES : [...COMPANY_PROPERTIES, rules.temperature.property])).map((r) => mapCompany(r, rules.temperature.property)) : [];
+    const dupCompanies = candidates.filter((c) => c.sdr_owner_id && normalizeCompanyName(c.name) && registrantKeys.has(`${normalizeCompanyName(c.name)}|${c.sdr_owner_id}`));
+    const dupIds = new Set(dupCompanies.map((c) => c.id));
+    const dupDealIds = newLost.filter((id) => (lostCompanies.get(id) ?? []).some((c) => dupIds.has(c)));
+    if (dupCompanies.length && dupDealIds.length) {
+      await upsert(db, "companies", [
+        "id text", "name text", "domain text", "country text", "sdr_owner_id text", "allocation_date date", "allocation_source text", "unassignment_date date",
+        "icp_tier text", "competitor_flag text", "temperature_raw text", "lifecycle_stage text", "hubspot_owner_id text", "sdr_team text", "sdr_history jsonb",
+      ], dupCompanies as any, ["id"]);
+      const dupDeals: ReturnType<typeof mapDeal>[] = [];
+      for (let i = 0; i < dupDealIds.length; i += 50) {
+        const batch = await hs.batchRead("deals", dupDealIds.slice(i, i + 50), dealProps, ["dealstage"]);
+        dupDeals.push(...batch.map((r) => mapDeal(r, stageLabels, env.dealMqlProperty, env.dealSqlProperty, stageInfo)));
+      }
+      await upsert(db, "deals", [
+        "id text", "name text", "stage text", "stage_label text", "is_closed boolean", "is_won boolean", "owner_id text", "amount numeric",
+        "created_at timestamptz", "mql_date date", "sql_date date",
+        "pipeline text", "pipeline_label text", "close_date timestamptz", "is_closed_lost boolean", "closed_lost_at timestamptz", "previous_stage_label text",
+        "lost_reason text", "lost_sub_reason text", "lost_comment text", "stage_history jsonb",
+      ], dupDeals as any, ["id"]);
+      const links: Array<[string, string]> = [];
+      for (const did of dupDeals.map((x) => x.id)) for (const coid of lostCompanies.get(did) ?? []) if (dupIds.has(coid)) links.push([coid, did]);
+      await tx((c) => replaceLinks(c, "deal_companies", "company_id", "deal_id", [...dupIds], links));
+    }
+    records.duplicate_company_lost_deals = dupDealIds.length;
+    if (dupCompanies.length) warnings.push(`${dupCompanies.length} duplicate company record(s) found with recent closed-lost deals (same name and SDR owner as an event account): ${dupCompanies.slice(0, 5).map((c) => c.name).join("; ")}. Consider merging them in HubSpot.`);
+  }
 }

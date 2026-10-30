@@ -8,7 +8,7 @@ const LEVEL_HINT: Record<Risk, string> = {
   critical: "SLA breached with no outreach, or follow-up stalled",
   at_risk: "First touch due today, or below expected cadence",
   healthy: "Actively worked across weeks, or in play",
-  neutral: "Inside SLA window, next touch not yet due, or unverified",
+  neutral: "Inside SLA window, next touch not yet due, unverified, or recently closed lost",
 };
 
 export async function overviewView(route: Route): Promise<HTMLElement> {
@@ -85,28 +85,35 @@ export async function overviewView(route: Route): Promise<HTMLElement> {
           row("Actively worked", "Meeting cadence across multiple weeks", t.active, "healthy"),
           row("Completed / in play", "Meeting, reply, open deal or disqualified", t.inPlay, "healthy"),
           row("Unable to verify", "Outreach logged on the company, not the contact", t.unverifiable, "neutral"),
+          t.recentlyLost ? row("Recently closed lost", `Account closed lost recently; no SLA`, t.recentlyLost, "neutral") : null,
         )));
   };
 
   // ---- 5. SDR comparison: coverage, depth and consistency side by side; risk markers come from statuses
   const sr = (id: string) => d.sdrRisk[id];
   const sdrOpen = (r: any, bucket: string, patch: Partial<FilterState> = {}) => () => open(bucket, { sdr: r.ownerId, region: "", ...patch }, `${r.name}`);
+  const dp = (id: string) => d.depth?.[id];
+  const tgtMin = d.touchTarget?.minimum ?? 6;
   const sdrCols: Col<any>[] = [
     { key: "name", label: "SDR", render: (r) => [h("span", { class: "link", onclick: sdrOpen(r, "eligible") }, r.name), h("span", { class: "faint" }, ` ${r.region}`)] },
     { key: "hotCoverage", label: "Hot coverage", num: true, title: "Hot leads with at least one touch. ▲ marks Hot leads past SLA with no outreach.",
       render: (r) => flag(sr(r.ownerId).hotOverdue ? "critical" : null, [fmt.pct(r.hotCoverage), h("span", { class: "faint" }, ` ${r.hotContacted}/${r.hotAssigned}`)], sr(r.ownerId).hotOverdue ? `${sr(r.ownerId).hotOverdue} Hot leads past SLA with no outreach` : undefined) },
     { key: "warmCoverage", label: "Warm coverage", num: true,
       render: (r) => flag(sr(r.ownerId).warmOverdue ? "critical" : null, [fmt.pct(r.warmCoverage), h("span", { class: "faint" }, ` ${r.warmContacted}/${r.warmAssigned}`)], sr(r.ownerId).warmOverdue ? `${sr(r.ownerId).warmOverdue} Warm leads past SLA with no outreach` : undefined) },
-    { key: "depth", label: "Follow-up depth", num: true, sort: (r) => r.avgTouchesFirst30, title: "Avg touches in first 30 days (leads ≥30 days old) · share of worked leads with one touch. ◆ marks one-touch leads where more outreach is due.",
-      render: (r) => flag(sr(r.ownerId).oneTouchDue ? "at_risk" : null, [r.mature30Leads ? fmt.dec(r.avgTouchesFirst30) : "–", r.oneTouchPct === null ? null : h("span", { class: "faint" }, ` · ${fmt.pct(r.oneTouchPct)} 1-touch`)], sr(r.ownerId).oneTouchDue ? `${sr(r.ownerId).oneTouchDue} one-touch leads where more outreach is due` : undefined) },
+    { key: "perLead", label: "Avg touches / lead", num: true, sort: (r) => dp(r.ownerId)?.avgPerLead ?? null, title: "Qualifying contact touches since eligibility ÷ eligible leads",
+      render: (r) => fmt.dec(dp(r.ownerId)?.avgPerLead ?? null) },
+    { key: "target", label: `% at ${tgtMin}+`, num: true, sort: (r) => dp(r.ownerId)?.atTargetPct ?? null, title: `Eligible leads with at least ${tgtMin} touches since eligibility (progress toward the ${tgtMin}–${d.touchTarget?.bandMax ?? 7} target)`,
+      render: (r) => fmt.pct(dp(r.ownerId)?.atTargetPct ?? null) },
+    { key: "oneTouch", label: "1-touch only", num: true, sort: (r) => dp(r.ownerId)?.oneTouchPct ?? null, title: "Share of eligible leads with exactly one touch. ◆ marks one-touch leads where more outreach is due.",
+      render: (r) => flag(sr(r.ownerId).oneTouchDue ? "at_risk" : null, fmt.pct(dp(r.ownerId)?.oneTouchPct ?? null), sr(r.ownerId).oneTouchDue ? `${sr(r.ownerId).oneTouchDue} one-touch leads where more outreach is due` : undefined) },
     { key: "multiWeekPct", label: "Multi-week", num: true, title: "Leads ≥14 days old touched in 2+ distinct weeks. ▲ marks stalled leads.",
       render: (r) => flag(sr(r.ownerId).stalled ? "critical" : null, r.mature14Leads ? fmt.pct(r.multiWeekPct) : "–", sr(r.ownerId).stalled ? `${sr(r.ownerId).stalled} stalled leads` : undefined) },
     { key: "overdue", label: "Overdue", num: true, render: (r) => r.overdue ? h("span", { class: "link crit-t strong", onclick: sdrOpen(r, "overdue") }, String(r.overdue)) : h("span", { class: "faint" }, "0") },
     { key: "crit", label: "Critical", num: true, sort: (r) => sr(r.ownerId).all.critical, render: (r) => sr(r.ownerId).all.critical ? h("span", { class: "link crit-t strong", onclick: sdrOpen(r, "risk_critical") }, String(sr(r.ownerId).all.critical)) : h("span", { class: "faint" }, "0") },
-    { key: "risk", label: "At risk", num: true, sort: (r) => sr(r.ownerId).all.at_risk, render: (r) => sr(r.ownerId).all.at_risk ? h("span", { class: "link warnr-t", onclick: sdrOpen(r, "risk_at_risk") }, String(sr(r.ownerId).all.at_risk)) : h("span", { class: "faint" }, "0") },
-    { key: "health", label: "Health", sort: (r) => ({ critical: 0, at_risk: 1, neutral: 2, healthy: 3, none: 4 } as Record<string, number>)[sr(r.ownerId).health] ?? 3,
+    { key: "health", label: "Health", sort: (r) => ({ critical: 0, at_risk: 1, neutral: 2, healthy: 3, none: 4 } as Record<string, number>)[sr(r.ownerId).health] ?? 4,
       render: (r) => sr(r.ownerId).health === "none" ? h("span", { class: "faint" }, "No eligible leads") : riskPill(sr(r.ownerId).health) },
   ];
+
 
   const cmp = d.comparison;
   const cmpCard = cmp ? h("div", { class: "card" },
@@ -145,7 +152,7 @@ export async function overviewView(route: Route): Promise<HTMLElement> {
     dealLine,
     h("h2", null, "Hot vs Warm follow-up", h("span", { class: "sub" }, "Coverage, overdue and engagement health by lead temperature")),
     h("div", { class: "grid2" }, tempCol(d.hot), tempCol(d.warm)),
-    h("h2", null, "SDR performance", h("span", { class: "sub" }, "Coverage, depth and consistency side by side; never blended into one score")),
+    h("h2", null, "SDR performance", h("span", { class: "sub" }, "Coverage, depth and consistency side by side; never blended into one score · full touch-depth view in SDR execution")),
     h("div", { class: "card" }, table(sdrCols, d.sdrs, { initialSort: "crit", rowClass: (r) => (sr(r.ownerId).health === "critical" ? "row-crit" : sr(r.ownerId).health === "at_risk" ? "row-warn" : "") })),
     h("p", { class: "legend" }, h("b", null, "Health"), ": Critical = at least one Hot lead past SLA or stalled · At risk = a Warm lead past SLA or stalled, or any lead at risk · Healthy = none of those and at least one lead healthily engaged · Not yet due = nothing to judge yet. ",
       "▲ critical, ◆ at risk; markers come from lead statuses, not from coverage thresholds."),

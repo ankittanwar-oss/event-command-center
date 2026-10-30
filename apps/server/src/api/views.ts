@@ -1,6 +1,6 @@
 import {
   accountQueue, applyFilters, BUCKETS, categoryBreakdown, CATEGORY_LABEL, dataQuality, eventSummaries, fiscalQuarterOf, inBucket, nextAction,
-  normalizeFilters, parseQuarterKey, DEFAULT_RULES, dealOrder, type DealRef, findings, narrative, RISK_LABEL, riskCounts, riskOf, sdrRisk, previousQuarter, qoq, quarterMetrics, regionBreakdown, rosterById, SDR_ROSTER, sdrTable, STATUS_LABEL, temperatureSummary,
+  normalizeFilters, parseQuarterKey, DEFAULT_RULES, dealOrder, type DealRef, depthStats, sdrDepth, accountDepth, WINDOW_LABEL, BANDS, type TouchWindow, findings, narrative, RISK_LABEL, riskCounts, riskOf, sdrRisk, previousQuarter, qoq, quarterMetrics, regionBreakdown, rosterById, SDR_ROSTER, sdrTable, STATUS_LABEL, temperatureSummary,
   type EventCategory, type Filters, type LeadFact, type NormalizedFilters, type Region, type Rules,
 } from "@ecc/core";
 
@@ -74,6 +74,25 @@ function dealContext(rows: LeadFact[], today: string) {
   return out;
 }
 
+const WINDOWS: TouchWindow[] = ["eligibility", "allocation", "event", "period"];
+function touchWindow(q: URLSearchParams): TouchWindow {
+  const w = (q.get("window") || "").trim() as TouchWindow;
+  return WINDOWS.includes(w) ? w : "eligibility";
+}
+
+/** SDR touch depth: per SDR (all / Hot / Warm) plus team totals, for the chosen measurement window. */
+export function depth(facts: LeadFact[], q: URLSearchParams, today: string, rules: Rules = DEFAULT_RULES) {
+  const { nf, rows } = filtered(facts, q, today);
+  const w = touchWindow(q);
+  const period = nf.quarterRange;
+  return {
+    filters: nf, window: w, windowLabel: WINDOW_LABEL[w], windows: WINDOWS.map((k) => ({ key: k, label: WINDOW_LABEL[k] })),
+    period, bands: BANDS.map((b) => ({ key: b.key, label: b.label })), target: rules.touchTarget,
+    team: depthStats(rows.filter((f) => !!f.sdrOwnerId), rules, w, period),
+    rows: sdrTable(rows, nf).map((r) => sdrDepth(rows, r.ownerId, rules, w, period)),
+  };
+}
+
 export function overview(facts: LeadFact[], q: URLSearchParams, today: string, rules: Rules = DEFAULT_RULES) {
   const { nf, rows } = filtered(facts, q, today);
   const cur = nf.quarter ? parseQuarterKey(nf.quarter) : null;
@@ -107,6 +126,8 @@ export function overview(facts: LeadFact[], q: URLSearchParams, today: string, r
     },
     sdrRisk: Object.fromEntries(sdrTable(rows, nf).map((s) => [s.ownerId, sdrRisk(rows, s.ownerId, rules)])),
     focus: top,
+    depth: Object.fromEntries(sdrTable(rows, nf).map((s) => [s.ownerId, sdrDepth(rows, s.ownerId, rules, "eligibility", nf.quarterRange).all])),
+    touchTarget: rules.touchTarget,
     dealContext: dealContext(rows, today),
     narrative: narrative(rows, rules, top),
     slaDays: { Hot: rules.cadence.Hot.firstTouchBusinessDays, Warm: rules.cadence.Warm.firstTouchBusinessDays },
@@ -136,7 +157,8 @@ export function accounts(facts: LeadFact[], q: URLSearchParams, today: string, r
   const dealFilter = (q.get("deal") || "").trim();
   let list = accountQueue(rows, rules).map((a) => {
     const deals = accountDeals(a.contacts);
-    return { ...a, deals, dealStatus: deals[0]?.status ?? "none" };
+    const dep = accountDepth(a.contacts, "eligibility", nf.quarterRange);
+    return { ...a, deals, dealStatus: deals.filter((d) => d.via !== "duplicate_company")[0]?.status ?? "none", recentlyLost: a.contacts.find((c) => c.recentlyLost)?.recentlyLost ?? null, depth: dep };
   });
   if (health) list = list.filter((a) => a.health === health);
   if (["open", "won", "lost", "none"].includes(dealFilter)) list = list.filter((a) => (dealFilter === "lost" ? a.deals.some((d) => d.status === "lost") : a.dealStatus === dealFilter));

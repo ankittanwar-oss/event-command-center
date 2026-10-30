@@ -6,3 +6,4 @@ export * from "./activities.js";
 export * from "./leads.js";
 export * from "./aggregate.js";
 export * from "./risk.js";
+export * from "./depth.js";

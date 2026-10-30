@@ -49,6 +49,8 @@ export function riskOf(f: LeadFact, rules: Rules): { level: RiskLevel; reason: s
       return { level: "healthy", reason: f.inPlayReason ?? "In play" };
     case "unverifiable":
       return { level: "neutral", reason: "Activity cannot be verified on the contact" };
+    case "recently_lost":
+      return { level: "neutral", reason: f.statusReason };
   }
 }
 

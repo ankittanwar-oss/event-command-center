@@ -12,7 +12,8 @@ export type FollowUpStatus =
   | "active"
   | "stalled"
   | "in_play"
-  | "unverifiable";
+  | "unverifiable"
+  | "recently_lost";
 
 export interface Company {
   id: string;
@@ -124,7 +125,7 @@ export interface DealRef {
   lostSubReason: string | null;
   lostComment: string | null;
   timing: "before_event" | "after_event" | "unknown";   // pre-existing (MQL, or creation if never MQL, before the event) / new since the event
-  via: "contact" | "company";          // associated with this contact, or only with the company
+  via: "contact" | "company" | "duplicate_company"; // this contact / this company only / a same-name company record with the same SDR
 }
 
 export interface Owner {
@@ -204,6 +205,11 @@ export interface LeadFact {
   /** Most relevant deal status across the contact's and company's deals (context only). Optional for old snapshots. */
   dealStatus?: DealStatus;
   deals?: DealRef[];
+  /** Account closed lost within rules.recentlyClosedLostDays: shown grey, no SLA. Optional for old snapshots. */
+  recentlyLost?: { dealId: string; dealName: string | null; closedAt: string; via: DealRef["via"] } | null;
+  /** Every qualifying contact touch (any date), used for allocation / event / reporting-period windows. */
+  allTouchDates?: string[];
+  allTouchIds?: string[];
   dataQuality: string[];
   priority: number;                   // higher = more urgent
 }

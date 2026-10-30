@@ -28,7 +28,7 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawe
 export const BUCKET_LABEL: Record<string, string> = {
   eligible: "Eligible leads", worked: "Worked (≥1 touch)", never_worked: "Never worked", overdue: "First touch overdue",
   insufficient: "Insufficient follow-up", active: "Actively worked", first_touch: "First touch completed", stalled: "Follow-up stalled",
-  in_play: "Completed / in play", unverifiable: "Unable to verify", one_touch: "One touch only", multi_week: "Multi-week follow-up",
+  in_play: "Completed / in play", unverifiable: "Unable to verify", recently_lost: "Recently closed lost", one_touch: "One touch only", multi_week: "Multi-week follow-up",
   sla_met: "First-touch SLA met", sla_missed: "First-touch SLA missed", attention: "Needs attention", no_next_step: "No next step scheduled",
   one_touch_due: "One touch only, more outreach due",
   risk_critical: "Critical", risk_at_risk: "At risk", risk_healthy: "Healthy", risk_neutral: "Not yet due / unverified",
@@ -61,7 +61,7 @@ function riskSummary(rows: any[]) {
 
 export function leadTable(rows: any[]) {
   const cols: Col<any>[] = [
-    { key: "risk", label: "Health", sort: (r) => (r.risk ? RISK_RANK[r.risk] ?? 9 : 9), render: (r) => riskPill(r.risk, undefined, r.riskReason ?? r.ineligibleReason ?? undefined) },
+    { key: "risk", label: "Health", sort: (r) => (r.risk ? RISK_RANK[r.risk] ?? 9 : 9), render: (r) => riskPill(r.risk, r.status === "recently_lost" && r.eligible ? "Recently closed lost" : undefined, r.riskReason ?? r.ineligibleReason ?? undefined) },
     { key: "contactName", label: "Contact", render: (r) => [h("span", { class: "link", onclick: () => openLead(r.eventId, r.contactId) }, r.contactName), hsLink("contact", r.contactId)] },
     { key: "companyName", label: "Company", render: (r) => [r.companyName ?? "–", hsLink("company", r.companyId)] },
     { key: "eventName", label: "Event", render: (r) => h("span", { title: r.eventName }, (r.eventName ?? "").slice(0, 38)) },
@@ -95,10 +95,11 @@ export async function openLead(eventId: string, contactId: string) {
         kv("SDR (company SDR owner)", sdrNames.get(f.sdrOwnerId) ?? (f.sdrOwnerRaw ? `Not on roster (${f.sdrOwnerRaw})` : "Not assigned")),
         kv("Eligible", f.eligible ? "Yes" : `No – ${f.ineligibleReason}`),
         kv("Allocation / eligibility date", `${fmt.day(f.allocationDate)} / ${fmt.day(f.eligibilityDate)}`),
-        kv("Health", [riskPill(r.risk, undefined, r.riskReason ?? undefined), " ", h("span", { class: "muted" }, r.riskReason ?? (f.eligible ? "" : "Not eligible for follow-up"))]),
+        kv("Health", [riskPill(r.risk, f.status === "recently_lost" ? "Recently closed lost" : undefined, r.riskReason ?? undefined), " ", h("span", { class: "muted" }, r.riskReason ?? (f.eligible ? "" : "Not eligible for follow-up"))]),
         kv("Status", [statusPill(f.status, f.status.replace("_", " "), r.risk), " ", f.statusReason]),
         kv("Next action", r.nextAction ?? "–"),
-        kv("Touches (since eligibility / post-event / since allocation)", `${f.touchesSinceEligibility} / ${f.touchesPostEvent} / ${f.touchesSinceAllocation ?? "–"}`),
+        kv("Touches (since eligibility / since event / since allocation)", [`${f.touchesSinceEligibility} / ${f.touchesPostEvent} / `, f.touchesSinceAllocation ?? h("span", { class: "warnr-t", title: "No allocation date in HubSpot" }, "allocation date missing")]),
+        kv("Consistency", `${f.distinctTouchDays} distinct days · ${f.distinctTouchWeeks} week(s) · avg gap ${f.avgGapDays ?? "–"} d · longest gap ${f.maxGapDays ?? "–"} d · last touch ${f.daysSinceLastTouch ?? "–"} d ago`),
         kv("First-touch SLA", f.firstTouchSlaMet === null ? "Pending" : f.firstTouchSlaMet ? `Met (${f.businessDaysToFirstTouch} business days)` : "Missed"),
         kv("Expected touches by now", f.expectedTouches),
         kv("Attendance", f.attendance),

@@ -24,6 +24,7 @@ export const STATUS_LABEL: Record<FollowUpStatus, string> = {
   stalled: "Follow-Up Stalled",
   in_play: "Completed / In Play",
   unverifiable: "Unable to Verify",
+  recently_lost: "Recently Closed Lost",
 };
 
 const PRIORITY_TIERS = new Set(["Targetable - Tier 1A", "Tier 1", "Targetable - Tier 1", "Targetable - Tier 2"]);
@@ -114,6 +115,11 @@ export function computeLeadFact(
   const ignoreDeal = rules.ignoredDealNamePattern ? new RegExp(rules.ignoredDealNamePattern, "i") : null;
   const deals = uniqueDeals([...(ds.dealsByContact.get(contact.id) ?? []), ...(company ? ds.dealsByCompany.get(company.id) ?? [] : [])])
     .filter((d) => !(ignoreDeal && d.name && ignoreDeal.test(d.name)));
+  // Deals on duplicate company records (same normalised name, same SDR owner): context and recently-lost only.
+  const ownDealIds = new Set(deals.map((d) => d.id));
+  const siblingDeals = (rules.matchDuplicateCompanies && company ? duplicateCompanies(ds, company) : [])
+    .flatMap((c) => ds.dealsByCompany.get(c.id) ?? [])
+    .filter((d) => !ownDealIds.has(d.id) && !(ignoreDeal && d.name && ignoreDeal.test(d.name)));
 
   // ---- prior conversation (before the event): meeting, prospect reply, or deal that already existed
   const priorConversation = !!ev.date && (
@@ -183,6 +189,20 @@ export function computeLeadFact(
     else if (contact.leadStatus && rules.disqualifiedLeadStatuses.includes(contact.leadStatus.toUpperCase())) inPlayReason = "Disqualified";
   }
 
+  // ---- recently closed lost (account level, incl. duplicate company records): grey, no SLA, for N days after the loss
+  let recentlyLost: LeadFact["recentlyLost"] = null;
+  if (rules.recentlyClosedLostDays > 0) {
+    const from = addDays(today, -rules.recentlyClosedLostDays);
+    const lostDate = (d: Deal) => (d.isClosedLost || (d.isClosed && !d.isWon) ? d.closedLostAt ?? d.closeDate ?? null : null);
+    const candidates = [...deals.map((d) => ({ d, via: (ds.dealsByContact.get(contact.id) ?? []).some((x) => x.id === d.id) ? "contact" as const : "company" as const })),
+      ...siblingDeals.map((d) => ({ d, via: "duplicate_company" as const }))]
+      .map((x) => ({ ...x, at: lostDate(x.d) }))
+      .filter((x): x is typeof x & { at: string } => !!x.at && toDate(x.at)! >= from && toDate(x.at)! <= today)
+      .sort((a, b) => b.at.localeCompare(a.at));
+    const top = candidates[0];
+    if (top) recentlyLost = { dealId: top.d.id, dealName: top.d.name, closedAt: top.at, via: top.via };
+  }
+
   // ---- outreach logged on the company but not on this contact
   const companyOutreachOnly = sinceElig.length === 0 && !!company && !!eligibilityDate &&
     companyActs.some((a) => !a.contactIds.includes(contact.id) && toDate(a.timestamp)! >= eligibilityDate && touchKind(a, sdr, rules) !== null);
@@ -197,6 +217,10 @@ export function computeLeadFact(
   let status: FollowUpStatus;
   let statusReason: string;
   if (inPlayReason) { status = "in_play"; statusReason = inPlayReason; }
+  else if (recentlyLost) {
+    status = "recently_lost";
+    statusReason = `Closed lost on ${toDate(recentlyLost.closedAt)}${recentlyLost.via === "duplicate_company" ? " (on a duplicate company record)" : ""}; no SLA for ${rules.recentlyClosedLostDays} days after the loss`;
+  }
   else if (!eligibilityDate) { status = "unverifiable"; statusReason = "Event date unknown"; }
   else if (sinceElig.length === 0 && companyOutreachOnly) { status = "unverifiable"; statusReason = "Outreach is logged on the company but not on this contact"; }
   else if (sinceElig.length === 0) { status = "never_worked"; statusReason = overdue ? `No outreach ${bizSinceElig} business days after eligibility` : "Within first-touch window"; }
@@ -205,7 +229,8 @@ export function computeLeadFact(
     status = "active"; statusReason = `${sinceElig.length} touches across ${weeks.size} week(s)`;
   } else { status = "first_touch"; statusReason = `${sinceElig.length} of ${Math.max(expected, 2)} expected touches`; }
 
-  const insufficient = eligible && sinceElig.length > 0 && !inPlayReason && (sinceElig.length < expected || status === "stalled");
+  const noSla = status === "recently_lost";
+  const insufficient = eligible && sinceElig.length > 0 && !inPlayReason && !noSla && (sinceElig.length < expected || status === "stalled");
 
   const icpPriority = !!tier && PRIORITY_TIERS.has(tier);
   let priority = 0;
@@ -217,7 +242,7 @@ export function computeLeadFact(
     if (status === "unverifiable") priority += 20;
     if (icpPriority) priority += 20;
     if (attendance === "attended") priority += 10;
-    if (status === "in_play" || status === "active") priority -= 60;
+    if (status === "in_play" || status === "active" || status === "recently_lost") priority -= 60;
   }
 
   const inWindow = (d: string | null) => !!d && !!ev.date && toDate(d)! >= ev.date && daysBetween(ev.date, toDate(d)!) <= rules.dealAttributionDays;
@@ -230,7 +255,7 @@ export function computeLeadFact(
 
   // Deal history as context (does not affect eligibility, status or attribution)
   const contactDealIds = new Set((ds.dealsByContact.get(contact.id) ?? []).map((d) => d.id));
-  const dealRefs: DealRef[] = deals.map((d) => {
+  const dealRefs: DealRef[] = [...deals, ...siblingDeals].map((d) => {
     const status: DealRef["status"] = d.isWon ? "won" : d.isClosedLost || (d.isClosed && !d.isWon) ? "lost" : "open";
     return {
       id: d.id, name: d.name, status, stageLabel: d.stageLabel,
@@ -239,7 +264,7 @@ export function computeLeadFact(
       lostReason: status === "lost" ? d.lostReason ?? null : null, lostSubReason: status === "lost" ? d.lostSubReason ?? null : null,
       lostComment: status === "lost" ? d.lostComment ?? null : null,
       timing: !ev.date || (!d.mqlDate && !d.createdAt) ? "unknown" : historical(d) ? "before_event" : "after_event",
-      via: contactDealIds.has(d.id) ? "contact" : "company",
+      via: contactDealIds.has(d.id) ? "contact" : ownDealIds.has(d.id) ? "company" : "duplicate_company",
     };
   });
   dealRefs.sort(dealOrder);
@@ -260,7 +285,7 @@ export function computeLeadFact(
     maxGapDays: gaps.length ? Math.max(...gaps) : null,
     daysSinceLastTouch: lastTouchAt ? daysBetween(toDate(lastTouchAt)!, today) : null,
     businessDaysToFirstTouch: bizToFirst, businessDaysSinceEligibility: bizSinceElig,
-    firstTouchSlaMet: slaMet, firstTouchOverdue: overdue, expectedTouches: expected,
+    firstTouchSlaMet: noSla ? null : slaMet, firstTouchOverdue: noSla ? false : overdue, expectedTouches: expected,
     insufficientFollowUp: insufficient, multiWeek: weeks.size >= rules.multiWeekMinWeeks,
     nextTaskDue, hasNextStep: openTasks.length > 0 || futureMeeting,
     status, statusReason, inPlayReason, companyOutreachOnly,
@@ -268,8 +293,35 @@ export function computeLeadFact(
     touchDates: sinceElig.map((t) => t.timestamp),
     touchIds: sinceElig.map((t) => t.activityId),
     priorConversation, isUpcoming, preEventTouches, icpPriority,
-    attributedDeals, sqlDeals, dealStatus: dealRefs[0]?.status ?? "none", deals: dealRefs, dataQuality: dq, priority,
+    attributedDeals, sqlDeals, dealStatus: dealRefs.filter((d) => d.via !== "duplicate_company")[0]?.status ?? "none", deals: dealRefs, recentlyLost,
+    allTouchDates: touches.map((t) => t.timestamp), allTouchIds: touches.map((t) => t.activityId),
+    dataQuality: dq, priority,
   };
+}
+
+/** Normalised company name for duplicate-record matching ("The Channel Company, Inc." -> "channel company"). */
+export function normalizeCompanyName(name: string | null | undefined): string {
+  return (name ?? "").toLowerCase().replace(/[^a-z0-9 ]+/g, " ")
+    .replace(/\b(the|inc|incorporated|llc|ltd|limited|corp|corporation|plc|gmbh|pvt|private|co)\b/g, " ").replace(/\s+/g, " ").trim();
+}
+
+const dupIndex = new WeakMap<Dataset, Map<string, Company[]>>();
+/** Other company records with the same normalised name and the same SDR owner (likely duplicates in HubSpot). */
+export function duplicateCompanies(ds: Dataset, company: Company): Company[] {
+  let idx = dupIndex.get(ds);
+  if (!idx) {
+    idx = new Map();
+    for (const c of ds.companies.values()) {
+      const key = normalizeCompanyName(c.name);
+      if (!key || !c.sdrOwnerId) continue;
+      const k = `${key}|${c.sdrOwnerId}`;
+      (idx.get(k) ?? idx.set(k, []).get(k)!).push(c);
+    }
+    dupIndex.set(ds, idx);
+  }
+  const key = normalizeCompanyName(company.name);
+  if (!key || !company.sdrOwnerId) return [];
+  return (idx.get(`${key}|${company.sdrOwnerId}`) ?? []).filter((c) => c.id !== company.id);
 }
 
 /** Most relevant first: open deals, then the most recently closed (lost or won), then the rest by created date. */

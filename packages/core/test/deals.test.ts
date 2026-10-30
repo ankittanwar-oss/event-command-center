@@ -51,13 +51,19 @@ describe("deal history as context", () => {
     assert.equal(d.lostReason, null);
     assert.equal(d.via, "company"); // company deal: not assumed to belong to this contact
   });
-  test("closed lost does not change eligibility, status or risk", () => {
+  test("closed lost never changes eligibility or attribution; within the recent window it shows as recently closed lost (grey)", () => {
     const withLost = one(dataset({ events: [ev], deals: [lost] }));
     const without = one(dataset({ events: [ev] }));
     assert.equal(withLost.eligible, without.eligible);
-    assert.equal(withLost.status, without.status);
-    assert.equal(riskOf(withLost, R)?.level, riskOf(without, R)?.level);
     assert.deepEqual(withLost.attributedDeals, []);
+    assert.equal(withLost.status, "recently_lost");
+    assert.equal(riskOf(withLost, R)?.level, "neutral");
+    // with the window switched off, status and risk are exactly as without the deal
+    const R0 = rules({ recentlyClosedLostDays: 0 });
+    const a = computeLeadFacts(dataset({ events: [ev], deals: [lost] }), R0, "2026-10-30")[0]!;
+    const b = computeLeadFacts(dataset({ events: [ev] }), R0, "2026-10-30")[0]!;
+    assert.equal(a.status, b.status);
+    assert.equal(riskOf(a, R0)?.level, riskOf(b, R0)?.level);
   });
   test("multiple deals: open first, then most recently closed; contact deals marked as the contact's", () => {
     const open = deal({ id: "d2", name: "Renewed", stageLabel: "Discovery", createdAt: "2026-10-10T00:00:00Z", mqlDate: null, contactIds: ["c1"], companyIds: ["co1"] });

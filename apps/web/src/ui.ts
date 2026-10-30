@@ -47,7 +47,7 @@ export const fmt = {
 };
 
 export const STATUS_CLASS: Record<string, string> = {
-  never_worked: "", stalled: "bad", unverifiable: "", first_touch: "", active: "good", in_play: "good",
+  never_worked: "", stalled: "bad", unverifiable: "", first_touch: "", active: "good", in_play: "good", recently_lost: "",
 };
 /** Status label; colored by the lead's risk level when known, so color always means the same thing. */
 export function statusPill(status: string, label: string, risk?: string | null) {
@@ -163,6 +163,6 @@ export function dealTable(deals: any[]) {
     { key: "previousStageLabel", label: "Stage before closed lost", wrap: true, render: (d) => (d.status === "lost" ? d.previousStageLabel ?? h("span", { class: "faint" }, "Not available") : "–") },
     { key: "lostReason", label: "Closed lost reason", wrap: true, render: (d) => d.status !== "lost" ? "–" :
       [d.lostReason, d.lostSubReason, d.lostComment].filter(Boolean).length ? [d.lostReason, d.lostSubReason, d.lostComment].filter(Boolean).join(" · ") : h("span", { class: "faint" }, "No reason recorded in HubSpot") },
-    { key: "via", label: "Associated with", render: (d) => d.via === "contact" ? "This contact" : h("span", { class: "muted", title: "Linked to the company only; not necessarily this contact's deal" }, "Company only") },
+    { key: "via", label: "Associated with", render: (d) => d.via === "contact" ? "This contact" : d.via === "duplicate_company" ? h("span", { class: "warnr-t", title: "Deal on another HubSpot company record with the same name and SDR owner (likely duplicate). Merge the records in HubSpot." }, "Duplicate company record") : h("span", { class: "muted", title: "Linked to the company only; not necessarily this contact's deal" }, "Company only") },
   ], deals, { initialSort: "", desc: false });
 }

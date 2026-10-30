@@ -1,18 +1,19 @@
 import { api } from "../api.js";
+import { depthSection } from "./depth.js";
 import { openLead, openLeads } from "../drawer.js";
 import { buildHash, filterParams, type Route } from "../state.js";
 import { dealPill, dealTable, flag, fmt, h, hsLink, riskPill, statusPill, table, tempPill, type Col, type Risk } from "../ui.js";
 
 const HEALTH = [
   ["", "All"], ["never_worked", "Never worked"], ["stalled", "Stalled"], ["unverifiable", "Unable to verify"],
-  ["first_touch", "First touch"], ["active", "Active"], ["in_play", "In play"],
+  ["first_touch", "First touch"], ["active", "Active"], ["in_play", "In play"], ["recently_lost", "Recently closed lost"],
 ] as const;
 
 export async function sdrView(route: Route): Promise<HTMLElement> {
   const f = route.filters;
   const health = route.extra.get("health") ?? "";
   const deal = route.extra.get("deal") ?? "";
-  const [s, a] = await Promise.all([api("sdr", filterParams(f)), api("accounts", { ...filterParams(f), health, deal, limit: "400" })]);
+  const [s, a, depthEl] = await Promise.all([api("sdr", filterParams(f)), api("accounts", { ...filterParams(f), health, deal, limit: "400" }), depthSection(route)]);
   const dealBadge = (acc: any) => {
     if (!acc.deals) return null; // snapshot computed before deal history existed
     const top = acc.deals[0];
@@ -67,7 +68,7 @@ export async function sdrView(route: Route): Promise<HTMLElement> {
         { key: "eventName", label: "Event", render: (c) => `${(c.eventName ?? "").slice(0, 32)} · ${fmt.day(c.eventDate)}` },
         { key: "temperature", label: "Temp", render: (c) => tempPill(c.temperature) },
         { key: "attendance", label: "Attended", render: (c) => c.attendance.replace("_", " ") },
-        { key: "risk", label: "Health", render: (c) => riskPill(c.risk, undefined, c.riskReason ?? undefined) },
+        { key: "risk", label: "Health", render: (c) => riskPill(c.risk, c.status === "recently_lost" ? "Recently closed lost" : undefined, c.riskReason ?? undefined) },
         { key: "status", label: "Status", render: (c) => statusPill(c.status, c.statusLabel, c.risk) },
         { key: "touches", label: "Touches", num: true },
         { key: "lastTouchAt", label: "Last touch", render: (c) => fmt.day(c.lastTouchAt) },
@@ -82,8 +83,9 @@ export async function sdrView(route: Route): Promise<HTMLElement> {
           h("span", { class: "muted", title: acc.events.map((e: any) => e.name).join("\n") }, acc.events.length === 1 ? (acc.events[0].name ?? "").slice(0, 28) : `${acc.events.length} events`),
           h("span", null, acc.sdrName ?? "–"),
           h("span", null, `${acc.contactsWorked}/${acc.eligibleContacts} worked`),
-          h("span", null, `${acc.touches}`, acc.lastTouch ? h("span", { class: "faint" }, ` · ${fmt.day(acc.lastTouch)}`) : null),
-          h("span", { title: acc.healthLabel }, riskPill(acc.risk, undefined, `Worst contact status: ${acc.healthLabel}`)),
+          h("span", { title: acc.depth ? `${acc.depth.touches} distinct touches on ${acc.depth.distinctDays} days across ${acc.depth.distinctWeeks} week(s), since eligibility` : undefined },
+            `${acc.depth?.touches ?? acc.touches}`, acc.depth ? h("span", { class: "faint" }, ` · ${acc.depth.distinctWeeks}w`) : null, acc.lastTouch ? h("span", { class: "faint" }, ` · ${fmt.day(acc.lastTouch)}`) : null),
+          h("span", { title: acc.healthLabel }, riskPill(acc.risk, acc.health === "recently_lost" ? "Recently closed lost" : undefined, `Worst contact status: ${acc.healthLabel}`)),
           h("span", { class: "muted" }, acc.nextAction)),
         contacts);
       return el;
@@ -92,6 +94,7 @@ export async function sdrView(route: Route): Promise<HTMLElement> {
   return h("div", null,
     h("h2", null, "SDR execution", h("span", { class: "sub" }, "Coverage, SLA, depth and consistency side by side · * age-adjusted")),
     h("div", { class: "card" }, table(cols, s.rows, { initialSort: "health", desc: false, rowClass: (r) => (r.risk.health === "critical" ? "row-crit" : r.risk.health === "at_risk" ? "row-warn" : "") })),
+    depthEl,
     h("h2", null, "Account queue", h("span", { class: "sub" }, `${fmt.n(a.total)} accounts · prioritised by temperature, overdue and stalled leads · touches de-duplicated across contacts`)),
     h("div", { class: "chips" }, HEALTH.map(([k, label]) => h("button", { class: health === k ? "on" : "", onclick: () => { location.hash = buildHash("sdr", f, { health: k, deal }); } }, label))),
     h("div", { class: "chips" }, h("span", { class: "muted", style: "align-self:center;margin-right:4px" }, "Deal history:"),

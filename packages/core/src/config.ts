@@ -52,6 +52,12 @@ export interface Rules {
   /** Count outbound touches by any approved roster SDR (true) or only by the account's assigned SDR (false). */
   countAnyRosterSdrTouch: boolean;
   dealAttributionDays: number;
+  /** Accounts whose deal went closed lost within this many days (of today) show "Recently closed lost": grey, no SLA. 0 = off. */
+  recentlyClosedLostDays: number;
+  /** Treat a company with the same normalised name AND the same SDR owner as the same account for deal history (duplicate HubSpot records). */
+  matchDuplicateCompanies: boolean;
+  /** Touch-depth target. windowDays = days after eligibility by which the target should be reached; null = not yet confirmed (progress only, never a breach). */
+  touchTarget: { minimum: number; bandMax: number; windowDays: number | null };
   /** Open deals in these stages (case-insensitive substring of the stage label) do NOT put a lead "in play". */
   inactiveDealStages: string[];
   /** Deals whose name matches this pattern (e.g. test records) are ignored entirely. */
@@ -96,6 +102,9 @@ export const DEFAULT_RULES: Rules = {
   multiWeekMinWeeks: 2,
   countAnyRosterSdrTouch: true,
   dealAttributionDays: 90,
+  recentlyClosedLostDays: 90,
+  matchDuplicateCompanies: true,
+  touchTarget: { minimum: 6, bandMax: 7, windowDays: null },
   inactiveDealStages: ["not qualified", "disqualified", "no show", "closed lost"],
   ignoredDealNamePattern: "^test\\b",
   staleAfterHours: 5,

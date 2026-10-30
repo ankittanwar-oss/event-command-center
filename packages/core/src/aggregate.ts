@@ -79,6 +79,7 @@ export const BUCKETS = {
   stalled: (f: LeadFact) => f.eligible && f.status === "stalled",
   in_play: (f: LeadFact) => f.eligible && f.status === "in_play",
   unverifiable: (f: LeadFact) => f.eligible && f.status === "unverifiable",
+  recently_lost: (f: LeadFact) => f.eligible && f.status === "recently_lost",
   one_touch: (f: LeadFact) => f.eligible && f.touchesSinceEligibility === 1,
   one_touch_due: (f: LeadFact) => f.eligible && f.status === "first_touch" && f.insufficientFollowUp && f.touchesSinceEligibility === 1,
   multi_week: (f: LeadFact) => f.eligible && f.multiWeek,
@@ -126,6 +127,7 @@ export function temperatureSummary(rows: LeadFact[], temp: Temperature) {
     stalled: metric(r, "stalled"),
     inPlay: metric(r, "in_play"),
     unverifiable: metric(r, "unverifiable"),
+    recentlyLost: metric(r, "recently_lost"),
   };
 }
 
@@ -224,6 +226,7 @@ export function nextAction(f: LeadFact, rules: Rules): string {
     case "active": return f.hasNextStep ? "On track – keep cadence" : "On track – schedule the next step";
     case "in_play": return f.inPlayReason ?? "In play";
     case "unverifiable": return f.companyOutreachOnly ? "Log outreach against the contact in HubSpot" : "Check HubSpot data";
+    case "recently_lost": return f.recentlyLost ? `Account closed lost ${f.recentlyLost.closedAt.slice(0, 10)}; no SLA, re-engage when appropriate` : "Recently closed lost";
   }
 }
 
@@ -233,7 +236,7 @@ function addBusinessDays(day: string, n: number, rules: Rules): string {
   return d;
 }
 
-const HEALTH_ORDER: FollowUpStatus[] = ["never_worked", "stalled", "unverifiable", "first_touch", "active", "in_play"];
+const HEALTH_ORDER: FollowUpStatus[] = ["never_worked", "stalled", "unverifiable", "first_touch", "recently_lost", "active", "in_play"];
 
 export function accountQueue(rows: LeadFact[], rules: Rules) {
   const byCompany = new Map<string, LeadFact[]>();
