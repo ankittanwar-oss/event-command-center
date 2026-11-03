@@ -3,12 +3,9 @@ import { openCustom, openLead } from "../drawer.js";
 import { buildHash, filterParams, type Route } from "../state.js";
 import { dealTable, fmt, h, hsLink, tempPill } from "../ui.js";
 
-// Daily Command Centre: one row per contact, grouped by what to do next.
-// Respond · Reach out · Follow up · Coordinate with AE, plus "In progress / no action now" kept out of the way.
-// Event-level reporting (CMO overview, drill-downs) is unchanged; this view only regroups the same records.
+// Daily Command Centre: account-first. Each HubSpot company appears once, in its highest-priority bucket; every
+// contact keeps its own action underneath. Event-level reporting (CMO overview, drill-downs) is unchanged.
 
-const ACTION_GROUPS = ["respond", "first_outreach", "follow_up", "qualified"];
-const PAGE = 100;
 
 const firstName = (n: string | null | undefined) => (n ?? "").split(" ")[0];
 const today = () => new Date().toISOString().slice(0, 10);
@@ -29,86 +26,170 @@ const intentWhy = (it: any) => {
 };
 const who = (o: any) => (o ? `${o.name ?? "Unknown user"}${o.role ? ` (${o.role})` : ""}` : null);
 
+// Account placement order (an account appears once, in the highest applicable bucket).
+const BUCKETS = [
+  { key: "respond", label: "Respond now", hint: "A prospect replied, or a HubSpot task is due" },
+  { key: "first_outreach", label: "First outreach", hint: "Contacts the SDR has not reached yet" },
+  { key: "follow_up", label: "Follow up", hint: "Contacted before; another touch is due" },
+  { key: "review", label: "Needs review", hint: "Missing or contradictory data" },
+  { key: "progress", label: "Up to date / in progress", hint: "Verified reason no action is due now" },
+  { key: "low", label: "Lower priority", hint: "Cold intent and no verified engagement" },
+  { key: "qualified", label: "Qualified / handed off", hint: "Verified SQL; no outstanding SDR action" },
+] as const;
+const RANK: Record<string, number> = Object.fromEntries(BUCKETS.map((b, i) => [b.key, i]));
+const SHORT: Record<string, [string, string]> = { respond: ["reply/task", "replies/tasks"], first_outreach: ["first outreach", "first outreach"], follow_up: ["follow-up", "follow-ups"],
+  review: ["review", "reviews"], progress: ["in progress", "in progress"], low: ["lower priority", "lower priority"], qualified: ["qualified", "qualified"] };
+const ACC_PAGE = 50;
+
+// Expanded state survives re-renders within the session (filters, navigation). Browser storage is optional.
+const STATE_KEY = "ecc-daily-open-v1";
+const openState: { buckets: Set<string> | null; accounts: Set<string> } = (() => {
+  try { const v = JSON.parse(sessionStorage.getItem(STATE_KEY) ?? "null"); if (v) return { buckets: new Set<string>(v.buckets), accounts: new Set<string>(v.accounts) }; } catch { /* ignore */ }
+  return { buckets: null, accounts: new Set<string>() };
+})();
+const saveState = () => { try { sessionStorage.setItem(STATE_KEY, JSON.stringify({ buckets: [...(openState.buckets ?? [])], accounts: [...openState.accounts] })); } catch { /* ignore */ } };
+
+/** Group contact rows by HubSpot company id (never by name). Contacts without a company stay on their own. */
+function toAccounts(items: any[]) {
+  const by = new Map<string, any[]>();
+  for (const i of items) { const k = i.companyId ?? `contact:${i.contactId}`; (by.get(k) ?? by.set(k, []).get(k)!).push(i); }
+  return [...by.entries()].map(([key, cs]) => {
+    cs.sort((a, b) => (RANK[a.group] ?? 9) - (RANK[b.group] ?? 9) || a.sort - b.sort || (a.due ?? "9").localeCompare(b.due ?? "9"));
+    const top = cs[0];
+    const counts: Record<string, number> = {};
+    for (const c of cs) counts[c.group] = (counts[c.group] ?? 0) + 1;
+    const lastSdr = cs.map((c) => c.yourLastTouchAt).filter(Boolean).sort().pop() ?? null;
+    return { key, companyId: top.companyId, companyName: top.companyName ?? top.contactName, intent: top.intent, sdrName: top.sdrName,
+      bucket: top.group, top, contacts: cs, counts, worked: cs.filter((c) => c.yourTouches > 0).length, awaiting: counts.first_outreach ?? 0, lastSdr };
+  }).sort((a, b) => (RANK[a.bucket] ?? 9) - (RANK[b.bucket] ?? 9) || a.top.sort - b.top.sort || (a.top.intentRank ?? 2) - (b.top.intentRank ?? 2) || (a.top.due ?? "9").localeCompare(b.top.due ?? "9") || (a.companyName ?? "").localeCompare(b.companyName ?? ""));
+}
+
 export async function dailyView(route: Route, meta: any): Promise<HTMLElement> {
   const f = route.filters;
   const x = route.extra;
   const d = await api("daily", filterParams(f));
   const C = d.contacts;
   const go = (patch: Record<string, string>) => { location.hash = buildHash("daily", f, { ...Object.fromEntries(x), ...patch }); };
-  const grp = x.get("g") ?? "";
-  const q = (x.get("q") ?? "").toLowerCase(), temp = x.get("temp") ?? "", ev = x.get("ev") ?? "";
+  const qRaw = x.get("q") ?? "", q = qRaw.toLowerCase(), intentF = x.get("intent") ?? "", ev = x.get("ev") ?? "";
 
-  const base: any[] = C.items.filter((i: any) =>
-    (!q || [i.companyName, i.contactName, i.jobTitle, ...i.events.map((e: any) => e.name)].some((v) => (v ?? "").toLowerCase().includes(q))) &&
-    (!temp || (temp === "HotWarm" ? i.temperature === "Hot" || i.temperature === "Warm" : i.temperature === temp)) &&
+  // ---- filters (search matches company OR contact; a matching contact brings its whole account so context stays visible)
+  const matchContact = (i: any) => !!q && [i.contactName, i.jobTitle, i.contactEmail, ...i.events.map((e: any) => e.name)].some((v) => (v ?? "").toLowerCase().includes(q));
+  const pre: any[] = C.items.filter((i: any) =>
+    (!intentF || (intentF === "hotwarm" ? ["hot", "warm"].includes(i.intent?.level) : i.intent?.level === intentF)) &&
     (!ev || i.events.some((e: any) => e.id === ev)));
-  const count = (k: string) => base.filter((i) => i.group === k).length;
+  const hitCompanies = new Set(pre.filter((i) => !q || (i.companyName ?? "").toLowerCase().includes(q) || matchContact(i)).map((i) => i.companyId ?? `contact:${i.contactId}`));
+  const base = pre.filter((i) => hitCompanies.has(i.companyId ?? `contact:${i.contactId}`));
+  const accounts = toAccounts(base);
+  const hits = new Set(base.filter(matchContact).map((i) => i.contactId));
 
-  // ---- group tabs (counts reflect search/temperature/event filters)
-  const tab = (k: string, label: string, hint: string) => h("button", { class: `gtab g-${k} ${grp === k ? "sel" : ""}`, title: hint, onclick: () => go({ g: grp === k ? "" : k }) },
-    h("span", { class: "gv" }, fmt.n(count(k))), h("span", { class: "gl" }, label));
-  const groups: any[] = C.groups;
-  const tabs = h("div", { class: "gtabs" },
-    groups.filter((g) => ACTION_GROUPS.includes(g.key)).map((g) => tab(g.key, g.label, g.hint)),
-    h("span", { class: "gsep" }),
-    ["low", "review", "progress"].map((k) => { const g = groups.find((y) => y.key === k); return g ? tab(g.key, g.label, g.hint) : null; }));
+  // ---- personal progress (account coverage and contact coverage kept separate)
+  const weekAgo = new Date(Date.now() - 7 * 86_400_000).toISOString().slice(0, 10);
+  const accWorked = accounts.filter((a) => a.worked > 0).length;
+  const touched = base.filter((i) => i.yourTouches > 0).length, two = base.filter((i) => i.yourTouches >= 2).length;
+  const week = base.filter((i) => i.yourLastTouchAt && i.yourLastTouchAt.slice(0, 10) >= weekAgo).length;
+  const stat = (v: number, l: string, sub?: string) => h("div", { class: "pt" }, h("b", null, fmt.n(v)), h("span", null, l), sub ? h("small", null, sub) : null);
+  const progress = h("div", { class: "ptrack" },
+    h("div", { class: "pg" }, h("div", { class: "pgt" }, "Accounts"), stat(accounts.length, "eligible"), stat(accWorked, "with an SDR touch"), stat(accounts.length - accWorked, "not yet worked")),
+    h("div", { class: "pg" }, h("div", { class: "pgt" }, "Contacts"), stat(base.length, "eligible"), stat(touched, "first outreach done"), stat(two, "2+ touches"), stat(week, "touched in the last 7 days", "by their current SDR")));
+
+  // ---- top counters: unique accounts per primary bucket + contacts with that contact-level action
+  const accIn = (k: string) => accounts.filter((a) => a.bucket === k);
+  const conWith = (k: string) => base.filter((i) => i.group === k).length;
+  const counters = h("div", { class: "gtabs" }, BUCKETS.slice(0, 3).concat(BUCKETS.filter((b) => b.key === "qualified") as any).map((b) =>
+    h("button", { class: `gtab g-${b.key}`, title: b.hint, onclick: () => { setOpen(b.key, true); document.getElementById(`bk-${b.key}`)?.scrollIntoView({ behavior: "smooth", block: "start" }); } },
+      h("span", { class: "gv" }, fmt.n(accIn(b.key).length)), h("span", { class: "gl" }, `${b.label} accounts`, h("br"), h("small", null, `${fmt.n(conWith(b.key))} contacts with this action`)))));
 
   // ---- controls
-  const search = h("input", { type: "search", placeholder: "Search company, contact, title, event", value: x.get("q") ?? "" }) as HTMLInputElement;
+  const search = h("input", { type: "search", placeholder: "Search company or contact", value: qRaw }) as HTMLInputElement;
   search.addEventListener("keydown", (e) => { if ((e as KeyboardEvent).key === "Enter") go({ q: search.value.trim() }); });
   const sel = (key: string, cur: string, opts: Array<[string, string]>) => h("select", { onchange: (e: Event) => go({ [key]: (e.target as HTMLSelectElement).value }) },
     opts.map(([v, l]) => { const o = h("option", { value: v }, l) as HTMLOptionElement; if (v === cur) o.selected = true; return o; }));
   const evs = new Map<string, string>();
   for (const i of C.items) for (const e of i.events) evs.set(e.id, `${(e.name ?? "").slice(0, 40)} · ${fmt.day(e.date)}`);
   const controls = h("div", { class: "wctl" }, search,
-    sel("temp", temp, [["", "Any temperature"], ["HotWarm", "Hot + Warm"], ["Hot", "Hot"], ["Warm", "Warm"]]),
-    sel("ev", ev, [["", "All events"], ...[...evs.entries()]]));
+    sel("intent", intentF, [["", "Any account intent"], ["hotwarm", "Hot + Warm"], ["hot", "Hot (Surging)"], ["warm", "Warm"], ["cold", "Cold"], ["unknown", "Unknown"]]),
+    sel("ev", ev, [["", "All events"], ...[...evs.entries()]]),
+    h("span", { class: "xall" }, h("button", { class: "linkbtn", onclick: () => { for (const b of BUCKETS) setOpen(b.key, true); } }, "Expand all"), " · ",
+      h("button", { class: "linkbtn", onclick: () => { for (const b of BUCKETS) setOpen(b.key, false); } }, "Collapse all")));
 
-  // ---- one compact row per contact: the next action leads; context is secondary
-  const row = (i: any) => {
-    const last = i.lastOutboundAt ? `${fmt.day(i.lastOutboundAt)} · ${who(i.lastBy) ?? "owner not recorded"}` : "Not contacted yet";
-    const touches = i.yourTouches || !i.yourTouchesSinceAllocation ? `${i.yourTouches} by ${firstName(i.sdrName) || "SDR"} since event` : "";
-    const timing = i.overdueBusinessDays ? `${i.overdueBusinessDays} bd overdue` : i.due ? (i.due === today() ? "due today" : `due ${fmt.day(i.due)}`) : i.daysSinceTouch !== null && i.yourTouches ? `${i.daysSinceTouch} bd since last touch` : "";
-    return h("div", { class: `crow2 c-${i.color}`, tabindex: "0", onclick: () => details(i), onkeydown: (e: KeyboardEvent) => { if (e.key === "Enter") details(i); } },
+  // ---- contact row (nested under its account)
+  const contactRow = (i: any) => {
+    const last = i.lastOutboundAt ? `${fmt.day(i.lastOutboundAt)} · ${who(i.lastBy) ?? "owner not recorded"}` : "Not contacted";
+    const timing = i.overdueBusinessDays ? ` · ${i.overdueBusinessDays} bd overdue` : i.due ? (i.due === today() ? " · due today" : ` · due ${fmt.day(i.due)}`) : "";
+    const prev = i.otherSdrTouches ? ` · ${i.otherSdrTouches} by ${i.otherBy?.name ?? "another SDR"}` : "";
+    return h("div", { class: `ctrow c-${i.color} ${hits.has(i.contactId) ? "hit" : ""}` },
       h("span", { class: "cdot2" }),
-      h("div", { class: "cdo" },
-        h("div", { class: "cact" }, i.action, timing ? h("span", { class: "ctime" }, ` · ${timing}`) : null),
-        h("div", { class: "cwhy" }, i.reason)),
-      h("div", { class: "cwho" },
-        h("div", { class: "cl1" }, h("b", null, i.companyName ?? "(no company)"), " ", intentPill(i.intent), h("span", { class: "faint" }, ` ${intentWhy(i.intent)}`)),
-        h("div", { class: "cl2" }, i.contactName, i.jobTitle ? ` · ${i.jobTitle}` : "", " · ", i.engagement)),
-      h("div", { class: "cmeta2" },
-        h("div", null, !f.sdr ? `${i.sdrName ?? "No SDR"} · ` : "", touches || `0 by ${firstName(i.sdrName) || "SDR"}`),
-        h("div", { class: "faint", title: "Last outbound contact by anyone (SDR, AE or other)" }, `Last: ${last}`)));
+      h("div", { class: "ctn" }, h("span", { class: "link", onclick: () => details(i) }, i.contactName), " ", hsLink("contact", i.contactId), i.jobTitle ? h("span", { class: "faint" }, ` · ${i.jobTitle}`) : null,
+        h("div", { class: "faint ctev" }, i.engagement)),
+      h("div", { class: "ctl" }, h("div", null, `Last: ${last}`), h("div", { class: "faint" }, `${i.yourTouches} by ${firstName(i.sdrName) || "SDR"}${prev}`)),
+      h("div", { class: "cta" }, h("span", { class: "cact" }, i.action), h("span", { class: "ctime" }, timing), h("div", { class: "faint cwhy" }, i.reason)));
   };
 
-  const section = (g: any) => {
-    const list = base.filter((i) => i.group === g.key);
-    const wrap = h("div", { class: "wlist" });
-    let shown = 0;
-    const more = h("button", { class: "btn more" }, "Show more");
-    const add = () => {
-      wrap.append(...list.slice(shown, shown + PAGE).map(row));
-      shown = Math.min(list.length, shown + PAGE);
-      more.textContent = `Show more (${list.length - shown} left)`;
-      more.style.display = shown < list.length ? "" : "none";
+  // ---- account row (click to expand its contacts)
+  const accountRow = (a: any) => {
+    const secondary = BUCKETS.filter((b) => a.counts[b.key]).map((b) => `${a.counts[b.key]} ${SHORT[b.key]![a.counts[b.key] === 1 ? 0 : 1]}`).join(" · ");
+    const autoOpen = q && a.contacts.some((c: any) => hits.has(c.contactId));
+    const isOpen = openState.accounts.has(a.key) || !!autoOpen;
+    const body = h("div", { class: "acontacts" });
+    const chev = h("span", { class: "chev" }, isOpen ? "▾" : "▸");
+    const el = h("div", { class: `arow ${isOpen ? "open" : ""}` });
+    const render = () => { if (!body.childElementCount) body.append(...a.contacts.map(contactRow)); };
+    const toggle = () => {
+      const now = !el.classList.contains("open");
+      el.classList.toggle("open", now); chev.textContent = now ? "▾" : "▸";
+      if (now) { render(); openState.accounts.add(a.key); } else openState.accounts.delete(a.key);
+      saveState();
     };
-    more.addEventListener("click", (e) => { e.stopPropagation(); add(); });
-    if (list.length) add();
-    return h("div", { class: "wsec" },
-      h("div", { class: "wsh" }, h("span", { class: "wst" }, g.label), h("span", { class: "wsn" }, fmt.n(list.length)), h("span", { class: "faint wsh-h" }, g.hint)),
-      list.length ? [wrap, more] : h("div", { class: "wempty" }, g.key === "respond" ? "No replies or HubSpot tasks due right now." : g.key === "qualified" ? "No verified SQLs in this view." : "Nothing here."));
+    if (isOpen) render();
+    const t = a.top;
+    el.append(
+      h("div", { class: `ahead c-${t.color}`, tabindex: "0", onclick: toggle, onkeydown: (e: KeyboardEvent) => { if (e.key === "Enter") toggle(); } },
+        chev,
+        h("div", { class: "aname" }, h("b", null, a.companyName ?? "(no company)"), " ", a.companyId ? h("span", { onclick: (e: Event) => e.stopPropagation() }, hsLink("company", a.companyId)) : null, " ", intentPill(a.intent),
+          h("div", { class: "faint awhy" }, intentWhy(a.intent))),
+        h("div", { class: "astat" }, h("div", null, `${a.contacts.length} contact${a.contacts.length === 1 ? "" : "s"} · ${a.worked} worked · ${a.awaiting} awaiting first outreach`),
+          h("div", { class: "faint" }, a.lastSdr ? `Last SDR touch ${fmt.day(a.lastSdr)}` : "No SDR touch yet", !f.sdr && a.sdrName ? ` · ${a.sdrName}` : "")),
+        h("div", { class: "aact" }, h("div", { class: "cact" }, t.action, t.overdueBusinessDays ? h("span", { class: "ctime" }, ` · ${t.overdueBusinessDays} bd overdue`) : null),
+          h("div", { class: "faint" }, secondary))),
+      body);
+    return el;
   };
 
-  const shownGroups = grp ? groups.filter((g) => g.key === grp) : groups.filter((g) => ACTION_GROUPS.includes(g.key));
-  const done = base.filter((i) => i.yourTouches > 0).length;
-  return h("div", { class: "wpage" },
-    h("div", { class: "dlive" }, h("span", { class: "dot" }), `Live from HubSpot · synced ${fmt.ago(meta?.freshness?.lastSuccessAt)} · ${fmt.n(base.length)} contacts · `,
-      h("b", null, `${fmt.n(done)} already contacted by their SDR`)),
-    tabs, controls,
-    grp ? h("div", { class: "faint", style: "margin:4px 0 8px" }, "Showing one group · ", h("span", { class: "link", onclick: () => go({ g: "" }) }, "show today's work")) : null,
-    shownGroups.map(section),
-    !grp ? h("div", { class: "faint", style: "margin-top:10px;font-size:12px" }, `${fmt.n(count("progress"))} contacts are in progress or need no action now. `, h("span", { class: "link", onclick: () => go({ g: "progress" }) }, "View them")) : null);
+  // ---- collapsible buckets (independent; counts always visible)
+  const bucketEls = new Map<string, { el: HTMLElement; fill: () => void; chev: HTMLElement }>();
+  const defaultOpen = () => { const first = BUCKETS.find((b) => accIn(b.key).length); return new Set(first ? [first.key] : []); };
+  if (!openState.buckets) openState.buckets = defaultOpen();
+  if (q) for (const a of accounts) openState.buckets.add(a.bucket); // a search opens the buckets that contain matches
+  function setOpen(k: string, open: boolean) {
+    const b = bucketEls.get(k); if (!b) return;
+    b.el.classList.toggle("open", open); b.chev.textContent = open ? "▾" : "▸";
+    if (open) { b.fill(); openState.buckets!.add(k); } else openState.buckets!.delete(k);
+    saveState();
+  }
+  const bucket = (b: (typeof BUCKETS)[number]) => {
+    const list = accIn(b.key);
+    const contacts = list.reduce((n, a) => n + a.contacts.length, 0);
+    const chev = h("span", { class: "chev" }, "▸");
+    const body = h("div", { class: "bbody" });
+    let shown = 0;
+    const more = h("button", { class: "btn more", style: "display:none" }, "Show more");
+    const addPage = () => { body.insertBefore(h("div", null, list.slice(shown, shown + ACC_PAGE).map(accountRow)), more); shown = Math.min(list.length, shown + ACC_PAGE); more.textContent = `Show more accounts (${list.length - shown} left)`; more.style.display = shown < list.length ? "" : "none"; };
+    more.addEventListener("click", addPage);
+    body.append(more);
+    const fill = () => { if (!shown && list.length) addPage(); if (!list.length && !body.querySelector(".wempty")) body.prepend(h("div", { class: "wempty" }, "Nothing here.")); };
+    const el = h("div", { class: `bucket b-${b.key}`, id: `bk-${b.key}` },
+      h("button", { class: "bhead", onclick: () => setOpen(b.key, !el.classList.contains("open")) },
+        chev, h("span", { class: "wst" }, b.label), h("span", { class: "bcount" }, `${fmt.n(list.length)} account${list.length === 1 ? "" : "s"} · ${fmt.n(contacts)} contact${contacts === 1 ? "" : "s"}`), h("span", { class: "faint wsh-h" }, b.hint)),
+      body);
+    bucketEls.set(b.key, { el, fill, chev });
+    return el;
+  };
+  const page = h("div", { class: "wpage" },
+    h("div", { class: "dlive" }, h("span", { class: "dot" }), `Live from HubSpot · synced ${fmt.ago(meta?.freshness?.lastSuccessAt)} · grouped by HubSpot company`),
+    progress, counters, controls,
+    BUCKETS.map(bucket));
+  for (const k of openState.buckets) setOpen(k, true);
+  return page;
 }
 
 /** Right-side drawer: A. next action · B. outreach history · C. qualification & deal. Details collapsed. */

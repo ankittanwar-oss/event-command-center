@@ -545,3 +545,37 @@ details.moresec > summary { cursor: pointer; font-weight: 600; padding: 8px 0; o
 .ipill.i-cold { background: #eef4ff; color: #3538cd; border-color: #c7d7fe; } .ipill.i-unknown { background: transparent; color: #667085; border-style: dashed; }
 .cl1 .faint { font-size: 12px; }
 @media (prefers-color-scheme: dark) { .ipill.i-hot { background: #4a1714; color: #fda29b; } .ipill.i-warm { background: #4a3510; color: #fec84b; } .ipill.i-cold { background: #1f2a4d; color: #a4bcfd; } }
+/* ---- Daily: account-first buckets */
+.ptrack { display: flex; flex-wrap: wrap; gap: 10px; margin: 10px 0; }
+.ptrack .pg { display: flex; flex-wrap: wrap; align-items: baseline; gap: 14px; padding: 8px 12px; border: 1px solid var(--line, #e4e4e7); border-radius: 10px; background: var(--card, #fff); }
+.ptrack .pgt { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; opacity: .6; }
+.ptrack .pt b { font-size: 16px; margin-right: 4px; } .ptrack .pt span { font-size: 12px; opacity: .75; } .ptrack .pt small { display: block; font-size: 10px; opacity: .55; }
+.gtab .gl small { font-size: 11px; opacity: .65; }
+.xall { margin-left: auto; font-size: 12px; white-space: nowrap; }
+.linkbtn { background: none; border: 0; padding: 0; color: #4f46e5; font: inherit; cursor: pointer; }
+.bucket { margin-bottom: 8px; border: 1px solid var(--line, #e4e4e7); border-radius: 10px; background: var(--card, #fff); overflow: hidden; }
+.bhead { display: flex; align-items: baseline; gap: 10px; width: 100%; padding: 9px 12px; background: none; border: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.bhead:hover { background: rgba(0,0,0,.03); }
+.bhead .chev, .ahead .chev { width: 12px; flex: none; opacity: .6; }
+.bcount { font-size: 13px; font-weight: 600; white-space: nowrap; }
+.bucket .bbody { display: none; border-top: 1px solid var(--line, #eee); }
+.bucket.open .bbody { display: block; animation: fadein .12s ease-out; }
+@keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
+.bucket .btn.more { margin: 8px 12px; }
+.arow { border-bottom: 1px solid var(--line, #f0f0f2); } .arow:last-child { border-bottom: 0; }
+.ahead { display: grid; grid-template-columns: 12px minmax(0, 2fr) minmax(0, 1.4fr) minmax(0, 1.4fr); gap: 12px; align-items: center; padding: 8px 12px; cursor: pointer; }
+.ahead:hover, .ahead:focus { background: rgba(0,0,0,.025); outline: none; }
+.aname { min-width: 0; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.awhy, .astat > div, .aact > div { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.astat > div:first-child { font-size: 12.5px; opacity: 1; }
+.ahead.c-red .cact { color: #b42318; } .ahead.c-amber .cact { color: #b54708; } .ahead.c-green .cact { color: #067647; } .ahead.c-grey .cact { color: #475467; }
+.acontacts { display: none; background: rgba(0,0,0,.02); padding: 2px 0 6px 24px; }
+.arow.open .acontacts { display: block; }
+.ctrow { display: grid; grid-template-columns: 8px minmax(0, 1.6fr) minmax(0, 1.3fr) minmax(0, 1.5fr); gap: 10px; align-items: center; padding: 6px 12px; font-size: 13px; border-top: 1px dashed var(--line, #eee); }
+.ctrow.hit { background: #fffbe6; }
+.ctrow > div { min-width: 0; } .ctn, .ctl > div, .cta { overflow: hidden; text-overflow: ellipsis; }
+.ctev, .ctl .faint, .cta .cwhy { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ctrow.c-red .cact { color: #b42318; } .ctrow.c-amber .cact { color: #b54708; } .ctrow.c-green .cact { color: #067647; } .ctrow.c-grey .cact { color: #475467; }
+.ctrow.c-red .cdot2 { background: #d92d20; } .ctrow.c-amber .cdot2 { background: #f79009; } .ctrow.c-green .cdot2 { background: #12b76a; }
+@media (max-width: 900px) { .ahead { grid-template-columns: 12px minmax(0, 1fr) minmax(0, 1fr); } .astat { display: none; } .ctrow { grid-template-columns: 8px minmax(0, 1fr) minmax(0, 1fr); } .ctl { display: none; } .acontacts { padding-left: 8px; } }
+@media (prefers-color-scheme: dark) { .ctrow.hit { background: #3a3210; } .acontacts { background: rgba(255,255,255,.03); } }

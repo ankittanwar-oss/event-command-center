@@ -498,6 +498,7 @@ export function contactWorklist(rows: LeadFact[], today: string, rules: Rules) {
     const best = [...scored].sort((x, y) => x.e.strength - y.e.strength)[0]!.e;
     const ids = new Set(leads.flatMap((l) => l.touchIds));
     const yourTouches = Math.max(0, ...leads.map((l) => l.currentSdrTouches ?? 0));
+    const yourLastTouchAt = leads.map((l) => l.currentSdrLastTouchAt ?? null).filter((x): x is string => !!x).sort().pop() ?? null;
     const sinceAlloc = leads.some((l) => l.currentSdrTouchesSinceAllocation != null) ? Math.max(0, ...leads.map((l) => l.currentSdrTouchesSinceAllocation ?? 0)) : null;
     const other = leads.map((l) => l.lastOtherSdrTouch).filter((x): x is { at: string; ownerId: string | null } => !!x).sort((a, b) => b.at.localeCompare(a.at))[0] ?? null;
     const lastOut = leads.map((l) => ({ at: l.lastOutboundAt !== undefined ? l.lastOutboundAt : l.lastTouchAt, by: l.lastOutboundAt !== undefined ? l.lastOutboundOwnerId ?? null : l.lastTouchOwnerId ?? null, kind: l.lastOutboundKind ?? null }))
@@ -519,7 +520,7 @@ export function contactWorklist(rows: LeadFact[], today: string, rules: Rules) {
         synced: !!f.accountIntent },
       lastReplyAt: f.lastReplyAt ?? null, conversation: activeConversation(f, today, rules), ownership: f.ownership ?? null, intentRank: ({ hot: 0, warm: 1, unknown: 2, cold: 3 } as const)[intentLevel(f)],
       ...top.a, eventId: f.eventId,
-      yourTouches, yourTouchesSinceAllocation: sinceAlloc, sdrTouchesAny: ids.size,
+      yourTouches, yourLastTouchAt, yourTouchesSinceAllocation: sinceAlloc, sdrTouchesAny: ids.size,
       otherSdrTouches: Math.max(0, ...leads.map((l) => l.otherSdrTouches ?? 0)), lastOtherSdrTouch: other,
       lastOutboundAt: lastOut?.at ?? null, lastOutboundOwnerId: lastOut?.by ?? null, lastOutboundKind: lastOut?.kind ?? null,
       daysSinceTouch: ia.businessDays, nextTask: f.nextTaskDue ? { due: f.nextTaskDue, subject: f.nextTaskSubject ?? null, ownerId: f.nextTaskOwnerId ?? null } : null,
