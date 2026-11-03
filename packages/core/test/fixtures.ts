@@ -5,7 +5,7 @@ export const DISHA = "88722653";      // APAC
 export const ANSHU = "2125691021";    // EMEA
 export const AE = "95421364";         // not on roster (an AE)
 
-export function rules(patch: unknown = {}): Rules { return mergeRules(DEFAULT_RULES, patch); }
+export function rules(patch: unknown = {}): Rules { return mergeRules({ ...DEFAULT_RULES, minEventDate: null }, patch); }
 
 export function company(p: Partial<Company> = {}): Company {
   return {

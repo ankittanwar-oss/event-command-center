@@ -403,3 +403,12 @@ describe("KPI / drilldown reconciliation", () => {
     }
   });
 });
+
+test("events before minEventDate are excluded; undated kept", async () => {
+  const { isBeforeCutoff, DEFAULT_RULES } = await import("../src/index.js");
+  const r = { ...DEFAULT_RULES, minEventDate: "2026-08-01" };
+  assert.equal(isBeforeCutoff("2026-07-31", r), true);
+  assert.equal(isBeforeCutoff("2026-08-01", r), false);
+  assert.equal(isBeforeCutoff(null, r), false);
+  assert.equal(isBeforeCutoff("2025-01-01", { ...r, minEventDate: null }), false);
+});
