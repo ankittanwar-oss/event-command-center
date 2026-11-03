@@ -237,6 +237,21 @@ describe("API views", () => {
     assert.doesNotThrow(() => views.depth(facts, new URLSearchParams("window=allocation"), "2026-10-30", DEFAULT_RULES));
     assert.doesNotThrow(() => views.accounts(facts, new URLSearchParams(""), "2026-10-30", DEFAULT_RULES));
   });
+  test("CMO overview: scorecard and timeliness cells reconcile with their drill-downs", () => {
+    const q = new URLSearchParams("quarter=all");
+    const o: any = views.overview(facts, q, "2026-10-30", DEFAULT_RULES);
+    const drill = (bucket: string, sdr?: string) => views.leads(facts, new URLSearchParams(`quarter=all&bucket=${bucket}${sdr ? `&sdr=${sdr}` : ""}&limit=5000`), "2026-10-30", DEFAULT_RULES).total;
+    const a = o.dimsAll;
+    assert.equal(drill("eligible"), a.leads);
+    assert.equal(drill("worked"), a.touched);
+    assert.equal(drill("multi_touch"), a.multi);
+    for (const k of Object.keys(a.ft)) assert.equal(drill(`ft_${k}`), a.ft[k]);
+    for (const k of Object.keys(a.fu)) assert.equal(drill(`fu_${k}`), a.fu[k]);
+    // first-touch groups cover every eligible lead; follow-up groups cover every touched lead
+    assert.equal(Object.values(a.ft).reduce((x: number, y: any) => x + y, 0), a.leads);
+    assert.equal(Object.values(a.fu).reduce((x: number, y: any) => x + y, 0), a.touched);
+    for (const [id, c] of Object.entries<any>(o.dims)) if (c.leads) assert.equal(drill("multi_touch", id), c.multi);
+  });
   test("daily command centre: every eligible account appears once, in exactly one timeliness group", () => {
     const d = views.daily(facts, new URLSearchParams("quarter=all"), "2026-10-30", DEFAULT_RULES);
     const eligibleAccounts = new Set(facts.filter((f: any) => f.eligible).map((f: any) => f.companyId ?? `c:${f.contactId}`));

@@ -187,52 +187,74 @@ export async function overviewView(route: Route): Promise<HTMLElement> {
   const depthBar = (c: any, ownerId: string) => h("td", { class: "sc sc-n" }, h("div", { class: "dbar" },
     BANDS.map(([k, key]) => c.depth[k] ? h("span", { class: `db b${key}`, style: `flex:${c.depth[k]}`, title: `${k} touches: ${c.depth[k]} leads`, onclick: () => open(`depth_${key}`, { sdr: ownerId, region: "" }) }) : null)),
     h("div", { class: "scs" }, BANDS.filter(([k]) => c.depth[k]).map(([k]) => `${k}:${c.depth[k]}`).join(" ")));
-  const slaCls = (met: number, dec: number) => dec ? grade("sla", pc(met, dec)) : "sc-n";
-  const odCls = (n: number) => grade("overdue", n);
+  // ---- 1. Core scorecard: eligible · first touch done · followed up. Neutral styling, every number drills down.
+  const pcTxt = (n: number, of: number) => (of ? `${(Math.round((n / of) * 1000) / 10).toFixed(1).replace(/\.0$/, "")}%` : "–");
+  const all = d.dimsAll ?? { leads: 0, touched: 0, multi: 0, firstOverdue: 0, followOverdue: 0, health: {}, ft: {}, fu: {}, depth: {} };
+  const core = (big: string, small: string, bucket: string, patch: Partial<FilterState>, title?: string) =>
+    h("td", { class: "sc sc-n core", onclick: () => open(bucket, patch, title) }, h("div", { class: "scb" }, big), small ? h("div", { class: "scs" }, small) : null);
   const scorecard = h("div", { class: "card scard" },
-    h("div", { class: "hd" }, h("span", { class: "t" }, "SDR scorecard"),
-      h("span", { class: "muted", style: "margin-left:auto" }, "Colour only on deadlines (SLA, overdue) · coverage and depth are shown, not graded · click any cell")),
-    scRows.length ? h("div", { class: "tbl-wrap" }, h("table", { class: "sctable" },
+    h("div", { class: "hd" }, h("span", { class: "t" }, "Outreach coverage"), h("span", { class: "muted", style: "margin-left:auto" }, "Eligible event-lead records · qualifying SDR touches since eligibility · click any number")),
+    scRows.length ? h("div", { class: "tbl-wrap" }, h("table", { class: "sctable coretable" },
+      h("thead", null, h("tr", null, h("th", null, "SDR"), h("th", { class: "n" }, "Total eligible leads"),
+        h("th", { class: "n", title: "At least one qualifying SDR touch · % of eligible leads" }, "First touch done"),
+        h("th", { class: "n", title: "At least two qualifying SDR touches · % of leads with a first touch" }, "Followed up (2+ touches)"))),
+      h("tbody", null,
+        scRows.map(({ r, c }: any) => h("tr", null,
+          h("td", null, h("span", { class: "link", onclick: () => open("eligible", { sdr: r.ownerId, region: "" }, r.name) }, r.name)),
+          core(fmt.n(c.leads), "", "eligible", { sdr: r.ownerId, region: "" }, `${r.name}: eligible leads`),
+          core(fmt.n(c.touched), `${pcTxt(c.touched, c.leads)} of ${fmt.n(c.leads)}`, "worked", { sdr: r.ownerId, region: "" }, `${r.name}: first touch done`),
+          core(fmt.n(c.multi), `${pcTxt(c.multi, c.touched)} of ${fmt.n(c.touched)} touched`, "multi_touch", { sdr: r.ownerId, region: "" }, `${r.name}: followed up (2+ touches)`))),
+        scRows.length > 1 ? h("tr", { class: "tot" },
+          h("td", null, h("b", null, "All leads in view"), all.leads !== scRows.reduce((n: number, x: any) => n + x.c.leads, 0) ? h("div", { class: "scs" }, "incl. leads with no roster SDR") : null),
+          core(fmt.n(all.leads), "", "eligible", {}, "Eligible leads"),
+          core(fmt.n(all.touched), `${pcTxt(all.touched, all.leads)} of ${fmt.n(all.leads)}`, "worked", {}, "First touch done"),
+          core(fmt.n(all.multi), `${pcTxt(all.multi, all.touched)} of ${fmt.n(all.touched)} touched`, "multi_touch", {}, "Followed up (2+ touches)")) : null))) : h("div", { class: "empty" }, "No SDR has eligible leads in this view."));
+
+  // ---- 2. Outreach timeliness (SLA), per SDR, two separate groups. Red only for verified overdue.
+  const FT: Array<[string, string, string]> = [["ontime", "On time", "First touch within the first-touch SLA"], ["today", "Due today", "No touch yet; SLA deadline is today"], ["upcoming", "Upcoming", "No touch yet; SLA deadline still ahead"], ["overdue", "Overdue", "No touch and past the first-touch SLA"]];
+  const FU: Array<[string, string, string]> = [["today", "Due today", "Below the expected-touch curve for the lead's age, or a HubSpot task / reply due today"], ["upcoming", "Upcoming", "Next follow-up date still ahead"], ["overdue", "Overdue", "No touch beyond the stall threshold, or a HubSpot task / reply past due"], ["unverified", "Unable to verify", "No verifiable follow-up date (e.g. open opportunity on the account only, company-level activity)"]];
+  const tcell = (n: number, bucket: string, patch: Partial<FilterState>, red: boolean, title: string) =>
+    h("td", { class: `sc ${red && n ? "sc-r" : "sc-n"}`, onclick: () => open(bucket, patch, title) }, h("div", { class: "scb" }, fmt.n(n)));
+  const trow = (name: any, c: any, patch: Partial<FilterState>, label: string) => h("tr", null, h("td", null, name),
+    FT.map(([k, l]) => tcell(c.ft[k] ?? 0, `ft_${k}`, patch, k === "overdue", `${label}: first touch ${l.toLowerCase()}`)),
+    FU.map(([k, l]) => tcell(c.fu[k] ?? 0, `fu_${k}`, patch, k === "overdue", `${label}: follow-up ${l.toLowerCase()}`)));
+  const timeliness = h("div", { class: "card scard" },
+    h("div", { class: "hd" }, h("span", { class: "t" }, "Outreach timeliness"), h("span", { class: "muted", style: "margin-left:auto" }, `Business-day SLAs · first-touch SLA applies to leads eligible since ${fmt.day(d.slaStartDate ?? "2026-10-30")}`)),
+    h("div", { class: "tbl-wrap" }, h("table", { class: "sctable ttable" },
       h("thead", null,
-        h("tr", null, h("th", { rowspan: 2 }, "SDR"), h("th", { class: "n", rowspan: 2 }, "Eligible leads"),
-          h("th", { class: "grp", colspan: 3 }, "A · First touch"), h("th", { class: "grp", colspan: 2 }, "B · Follow-up depth"), h("th", { class: "grp", colspan: 2 }, "C · Follow-up timing")),
-        h("tr", null,
-          h("th", { class: "n", title: "Leads with ≥1 qualifying SDR touch since eligibility" }, "Touched"),
-          h("th", { class: "n", title: `First touch within the SLA; only leads eligible since ${fmt.day(d.slaStartDate ?? "2026-10-30")} are judged` }, "On time"),
-          h("th", { class: "n", title: "No touch and past the first-touch SLA" }, "Overdue"),
-          h("th", { class: "n", title: "Leads with 2 or more qualifying SDR touches since eligibility" }, "2+ touches"),
-          h("th", { title: "Leads by qualifying touches: 0 · 1 · 2–3 · 4–5 · 6–7 · 8+" }, "Touch bands"),
-          h("th", { class: "n", title: "Below the expected-touch curve for the lead's age, not yet stalled" }, "Due"),
-          h("th", { class: "n", title: "No touch for longer than the stall threshold" }, "Overdue"))),
-      h("tbody", null, scRows.map(({ r, c }: any) => h("tr", null,
-        h("td", null, h("span", { class: "link", onclick: () => open("eligible", { sdr: r.ownerId, region: "" }, r.name) }, r.name)),
-        num(`${c.leads}`, "", "eligible", r.ownerId),
-        num(`${c.touched}`, `of ${c.leads}`, "worked", r.ownerId),
-        c.slaMet + c.slaMissed ? num(`${c.slaMet}`, `of ${c.slaMet + c.slaMissed}`, "sla_missed", r.ownerId, slaCls(c.slaMet, c.slaMet + c.slaMissed), `${c.slaMissed} first touched late or not at all`)
-          : h("td", { class: "sc sc-n", title: "No lead has reached its first-touch deadline under the SLA yet" }, h("div", { class: "scb faint" }, "–"), h("div", { class: "scs" }, "none due")),
-        num(`${c.firstOverdue}`, "", "overdue", r.ownerId, odCls(c.firstOverdue)),
-        num(`${c.multi}`, `of ${c.touched} touched`, "multi_touch", r.ownerId),
-        depthBar(c, r.ownerId),
-        num(`${c.followDue}`, "", "follow_due", r.ownerId, c.followDue ? "sc-a" : "sc-n"),
-        num(`${c.followOverdue}`, "", "follow_overdue", r.ownerId, odCls(c.followOverdue))))))) : h("div", { class: "empty" }, "No SDR has eligible leads in this view."),
+        h("tr", null, h("th", { rowspan: 2 }, "SDR"), h("th", { class: "grp", colspan: 4 }, "First-touch SLA"), h("th", { class: "grp sepl", colspan: 4 }, "Follow-up SLA (leads with a first touch)")),
+        h("tr", null, FT.map(([, l, t]) => h("th", { class: "n", title: t }, l)), FU.map(([, l, t], i) => h("th", { class: `n ${i === 0 ? "sepl" : ""}`, title: t }, l)))),
+      h("tbody", null, scRows.map(({ r, c }: any) => trow(r.name, c, { sdr: r.ownerId, region: "" }, r.name)),
+        scRows.length > 1 ? trow(h("b", null, "All leads in view"), all, {}, "All") : null))),
     h("div", { class: "legend", style: "padding: 8px 14px" },
-      "Counts are event-lead records (a contact registered for two events counts twice), the same population as every drill-down. ",
-      "Touches = qualifying outbound SDR touches since eligibility (later of event date and SDR allocation). ",
-      "A lead with one touch can be on time and still need follow-up: depth is never coloured."));
-  const HL: Array<[string, string]> = [["overdue", "Overdue"], ["due_today", "Due today"], ["upcoming", "Upcoming ≤5 bd"], ["not_yet_due", "Not yet due"], ["on_track", "On track"], ["unverified", "Unable to verify / paused"]];
-  const healthCard = scRows.length ? h("div", { class: "card scard" },
-    h("div", { class: "hd" }, h("span", { class: "t" }, "Action health"), h("span", { class: "muted", style: "margin-left:auto" }, "Each eligible lead in exactly one column · from SLA, cadence and verified task/reply dates")),
+      `Not shown: ${fmt.n(all.ft?.late ?? 0)} touched after the SLA, ${fmt.n(all.ft?.no_deadline ?? 0)} with no first-touch deadline (eligible before the SLA start, or activity unverifiable), `,
+      `${fmt.n(all.fu?.complete ?? 0)} with follow-up complete (cadence done, or meeting/reply/deal on the contact). Red = verified overdue only.`));
+
+  // ---- 3. Follow-up depth (secondary, collapsed)
+  const bandRows = scRows.map(({ r, c }: any) => h("tr", null, h("td", null, r.name),
+    BANDS.map(([k, key]) => h("td", { class: "sc sc-n", onclick: () => open(`depth_${key}`, { sdr: r.ownerId, region: "" }, `${r.name}: ${k} touches`) }, h("div", { class: "scb" }, fmt.n(c.depth[k] ?? 0)))),
+    depthBar(c, r.ownerId)));
+  const depthSection = h("details", { class: "card scard dsec" },
+    h("summary", { class: "hd" }, h("span", { class: "t" }, "Follow-up depth"), h("span", { class: "muted", style: "margin-left:auto" }, "Leads by qualifying SDR touches · click to expand")),
     h("div", { class: "tbl-wrap" }, h("table", { class: "sctable" },
-      h("thead", null, h("tr", null, h("th", null, "SDR"), HL.map(([, l]) => h("th", { class: "n" }, l)))),
-      h("tbody", null, scRows.map(({ r, c }: any) => h("tr", null, h("td", null, r.name),
-        HL.map(([k]) => num(`${c.health[k]}`, "", `health_${k}`, r.ownerId, k === "overdue" && c.health[k] ? "sc-r" : "sc-n"))))))),
-    h("div", { class: "legend", style: "padding: 8px 14px" }, "On track = cadence complete, or in play with a meeting, reply or deal on this contact. Open opportunities that sit only on the account are \"Unable to verify\", not on track.")) : null;
+      h("thead", null, h("tr", null, h("th", null, "SDR"), BANDS.map(([k]) => h("th", { class: "n" }, k === "0" ? "0 touches" : k === "1" ? "1 touch" : `${k}`)), h("th", null, "Mix"))),
+      h("tbody", null, bandRows))),
+    h("div", { style: "padding: 0 14px 14px" }, depthHead));
+
+  // ---- Factual banner (no verdict)
+  const verifiedOverdue = (all.firstOverdue ?? 0) + (all.fu?.overdue ?? 0);
+  const banner = h("div", { class: `fbanner ${verifiedOverdue ? "od" : ""}` },
+    `${fmt.n(all.leads)} eligible event leads · ${fmt.n(all.touched)} received first outreach · ${fmt.n(all.multi)} received follow-up`,
+    verifiedOverdue ? [" · ", h("b", { class: "crit-t" }, `${fmt.n(verifiedOverdue)} verified overdue`)] : null,
+    ` · ${fmt.n(all.health?.unverified ?? 0)} have no verifiable due date`);
 
   return h("div", null,
-    narrative,
+    banner,
     scorecard,
-    healthCard,
-    depthHead,
+    timeliness,
+    depthSection,
+    h("details", { class: "moresec" }, h("summary", null, "More analysis: risk mix, focus list, Hot vs Warm, SDR detail, categories, regions"),
+    narrative,
     summary,
     h("h2", null, "Where leadership should focus", h("span", { class: "sub" }, "Verified gaps, ordered by severity, temperature and volume · click to see the records")),
     focus,
@@ -251,6 +273,6 @@ export async function overviewView(route: Route): Promise<HTMLElement> {
       { key: "region", label: "Region" }, { key: "eligible", label: "Eligible", num: true }, { key: "hot", label: "Hot", num: true }, { key: "warm", label: "Warm", num: true },
       { key: "coverage", label: "Coverage", num: true, render: (r) => h("div", { class: "cbar" }, bar(r.coverage), fmt.pct(r.coverage)) },
       { key: "multiWeekPct", label: "Multi-week", num: true, render: (r) => fmt.pct(r.multiWeekPct) },
-    ], d.regions)),
+    ], d.regions))),
   );
 }

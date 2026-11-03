@@ -223,3 +223,29 @@ export function worklist(rows: LeadFact[], today: string, rules: Rules) {
   const counts = Object.fromEntries(WORK_SECTIONS.map((s) => [s.key, items.filter((i) => i.section === s.key).length])) as Record<WorkSection, number>;
   return { sections: WORK_SECTIONS, counts, items };
 }
+
+/**
+ * Outreach timeliness for the CMO overview, split into first-touch SLA and follow-up timing. Uses the existing SLA,
+ * cadence and stall rules via leadWork; records without a verifiable due date are never counted as compliant.
+ *   firstTouch: ontime | late | today | upcoming | overdue | no_deadline | null (not applicable: no first touch needed / ineligible)
+ *   followUp:   today | upcoming | overdue | unverified | complete | null (not touched yet / ineligible)
+ */
+export function outreachTimeliness(f: LeadFact, today: string, rules: Rules) {
+  if (!f.eligible) return { firstTouch: null, followUp: null } as const;
+  const w = leadWork(f, today, rules);
+  let firstTouch: "ontime" | "late" | "today" | "upcoming" | "overdue" | "no_deadline" | null = null;
+  if (f.touchesSinceEligibility > 0) firstTouch = f.firstTouchSlaMet === true ? "ontime" : f.firstTouchSlaMet === false ? "late" : "no_deadline";
+  else if (f.status === "never_worked" && f.firstTouchOverdue) firstTouch = "overdue";
+  else if (w.action === "Send first outreach") firstTouch = w.section === "today" ? "today" : w.section === "upcoming" ? "upcoming" : w.section === "overdue" ? "overdue" : "no_deadline";
+  else firstTouch = "no_deadline";
+  let followUp: "today" | "upcoming" | "overdue" | "unverified" | "complete" | null = null;
+  if (f.touchesSinceEligibility > 0) {
+    if (w.section === "overdue") followUp = "overdue";
+    else if (w.section === "today") followUp = "today";
+    else if (w.section === "respond") followUp = w.due && w.due < today ? "overdue" : "today";
+    else if (w.section === "upcoming") followUp = "upcoming";
+    else if (w.action === "Review next step" || (w.action === "Monitor" && contactLevelInPlay(f))) followUp = "complete";
+    else followUp = "unverified";
+  }
+  return { firstTouch, followUp };
+}

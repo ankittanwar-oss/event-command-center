@@ -60,24 +60,54 @@ function filterBar(route: Route): HTMLElement {
   );
 }
 
-/** Multi-select event filter: tick any number of events, then Apply. Stored as comma-separated ids. */
+/** Compact searchable multi-select for events. Stored as comma-separated event ids; Apply/Clear set the filter. */
 function eventPicker(current: string, apply: (v: string) => void): HTMLElement {
   const chosen = new Set(current ? current.split(",") : []);
-  const label = () => chosen.size === 0 ? "All events" : chosen.size === 1 ? (meta.events.find((e: any) => chosen.has(e.id))?.name ?? "1 event").slice(0, 28) : `${chosen.size} events`;
-  const btn = h("button", { type: "button", class: "reset" }, `${label()} ▾`);
+  const evs: any[] = meta.events.slice(0, 500);
+  const label = () => chosen.size === 0 ? "All events" : chosen.size === 1 ? (evs.find((e) => chosen.has(e.id))?.name ?? "1 event") : `${chosen.size} events`;
+  const btnText = h("span", { class: "evbt" }, label());
+  const badge = h("span", { class: "evbadge" }, chosen.size ? String(chosen.size) : "");
+  const btn = h("button", { type: "button", class: `evtrig ${chosen.size ? "on" : ""}`, "aria-haspopup": "listbox" }, btnText, badge, h("span", { class: "evcaret" }, "▾"));
+  const sync = () => { btnText.textContent = label(); badge.textContent = chosen.size ? String(chosen.size) : ""; count.textContent = chosen.size ? `${chosen.size} selected` : "None selected · all events"; };
+  const search = h("input", { type: "search", class: "evsearch", placeholder: "Search events" }) as HTMLInputElement;
+  const rows = evs.map((e) => {
+    const cb = h("input", { type: "checkbox" }) as HTMLInputElement;
+    cb.checked = chosen.has(e.id);
+    cb.addEventListener("change", () => { if (cb.checked) chosen.add(e.id); else chosen.delete(e.id); row.classList.toggle("sel", cb.checked); sync(); });
+    const row = h("label", { class: `evrow ${cb.checked ? "sel" : ""}`, title: e.name ?? "" }, cb,
+      h("span", { class: "evtxt" }, h("span", { class: "evname" }, e.name ?? "(unnamed event)"), h("span", { class: "evdate" }, fmt.day(e.date))));
+    return { e, cb, row };
+  });
+  const list = h("div", { class: "evlist", role: "listbox" }, rows.map((r) => r.row));
+  const empty = h("div", { class: "evempty", style: "display:none" }, "No events match");
+  search.addEventListener("input", () => {
+    const q = search.value.trim().toLowerCase(); let n = 0;
+    for (const r of rows) { const show = !q || (r.e.name ?? "").toLowerCase().includes(q); r.row.style.display = show ? "" : "none"; if (show) n++; }
+    empty.style.display = n ? "none" : "";
+  });
+  const visible = () => rows.filter((r) => r.row.style.display !== "none");
+  const count = h("span", { class: "evcount" });
   const menu = h("div", { class: "evmenu", style: "display:none" },
-    meta.events.slice(0, 300).map((e: any) => {
-      const cb = h("input", { type: "checkbox" }) as HTMLInputElement;
-      cb.checked = chosen.has(e.id);
-      cb.addEventListener("change", () => { if (cb.checked) chosen.add(e.id); else chosen.delete(e.id); btn.textContent = `${label()} ▾`; });
-      return h("label", null, cb, h("span", null, `${e.name ?? ""} · ${fmt.day(e.date)}`));
-    }),
-    h("div", { class: "evact" },
-      h("button", { type: "button", onclick: () => apply([...chosen].join(",")) }, "Apply"),
-      h("button", { type: "button", class: "reset", onclick: () => apply("") }, "Clear")));
+    h("div", { class: "evhead" }, search,
+      h("div", { class: "evbulk" },
+        h("button", { type: "button", class: "evlink", onclick: () => { for (const r of visible()) { r.cb.checked = true; chosen.add(r.e.id); r.row.classList.add("sel"); } sync(); } }, "Select all"),
+        h("button", { type: "button", class: "evlink", onclick: () => { for (const r of rows) { r.cb.checked = false; r.row.classList.remove("sel"); } chosen.clear(); sync(); } }, "Clear"),
+        count)),
+    list, empty,
+    h("div", { class: "evfoot" },
+      h("button", { type: "button", class: "evsec", onclick: () => apply("") }, "Reset to all"),
+      h("button", { type: "button", class: "evapply", onclick: () => apply([...chosen].join(",")) }, "Apply")));
+  sync();
   const wrap = h("div", { class: "evpick" }, btn, menu);
-  btn.addEventListener("click", (e) => { e.stopPropagation(); menu.style.display = menu.style.display === "none" ? "block" : "none"; });
+  const place = () => {
+    // keep inside the viewport: open to the left when there is no room on the right
+    menu.style.left = "0"; menu.style.right = "auto";
+    const r = menu.getBoundingClientRect();
+    if (r.right > window.innerWidth - 8) { menu.style.left = "auto"; menu.style.right = "0"; }
+  };
+  btn.addEventListener("click", (e) => { e.stopPropagation(); const show = menu.style.display === "none"; menu.style.display = show ? "flex" : "none"; if (show) { place(); search.focus(); } });
   menu.addEventListener("click", (e) => e.stopPropagation());
+  menu.addEventListener("keydown", (e) => { if ((e as KeyboardEvent).key === "Escape") menu.style.display = "none"; });
   document.addEventListener("click", () => { menu.style.display = "none"; });
   return wrap;
 }

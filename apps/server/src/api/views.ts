@@ -1,6 +1,6 @@
 import {
   accountQueue, applyFilters, BUCKETS, categoryBreakdown, CATEGORY_LABEL, dataQuality, eventSummaries, fiscalQuarterOf, inBucket, nextAction,
-  normalizeFilters, parseQuarterKey, worklist, leadDimensions, ACTION_HEALTH_LABEL, DEFAULT_RULES, dealOrder, type DealRef, depthStats, sdrDepth, accountDepth, WINDOW_LABEL, BANDS, type TouchWindow, findings, narrative, RISK_LABEL, riskCounts, riskOf, sdrRisk, previousQuarter, qoq, quarterMetrics, regionBreakdown, rosterById, SDR_ROSTER, sdrTable, STATUS_LABEL, temperatureSummary,
+  normalizeFilters, parseQuarterKey, worklist, leadDimensions, ACTION_HEALTH_LABEL, outreachTimeliness, DEFAULT_RULES, dealOrder, type DealRef, depthStats, sdrDepth, accountDepth, WINDOW_LABEL, BANDS, type TouchWindow, findings, narrative, RISK_LABEL, riskCounts, riskOf, sdrRisk, previousQuarter, qoq, quarterMetrics, regionBreakdown, rosterById, SDR_ROSTER, sdrTable, STATUS_LABEL, temperatureSummary,
   type EventCategory, type Filters, type LeadFact, type NormalizedFilters, type Region, type Rules,
 } from "@ecc/core";
 
@@ -49,6 +49,10 @@ function withRisk(f: LeadFact, rules: Rules, today?: string) {
 function matches(f: LeadFact, bucket: string, rules: Rules, today = ""): boolean {
   if (bucket.startsWith("risk_")) return riskOf(f, rules)?.level === bucket.slice(5);
   // Dimension buckets: health_<key>, depth_<band>, follow_overdue, follow_due (eligible leads only)
+  if (bucket.startsWith("ft_") || bucket.startsWith("fu_")) {
+    const t = outreachTimeliness(f, today, rules);
+    return bucket.startsWith("ft_") ? t.firstTouch === bucket.slice(3) : t.followUp === bucket.slice(3);
+  }
   if (bucket.startsWith("health_") || bucket.startsWith("depth_") || bucket.startsWith("follow_")) {
     if (!f.eligible) return false;
     const d = leadDimensions(f, today, rules);
@@ -108,7 +112,9 @@ export function depth(facts: LeadFact[], q: URLSearchParams, today: string, rule
 export function dimCounts(list: LeadFact[], today: string, rules: Rules) {
   const c = { leads: list.length, touched: 0, multi: 0, slaMet: 0, slaMissed: 0, firstOverdue: 0, followOverdue: 0, followDue: 0,
     health: { overdue: 0, due_today: 0, upcoming: 0, not_yet_due: 0, on_track: 0, unverified: 0 } as Record<string, number>,
-    depth: { "0": 0, "1": 0, "2–3": 0, "4–5": 0, "6–7": 0, "8+": 0 } as Record<string, number> };
+    depth: { "0": 0, "1": 0, "2–3": 0, "4–5": 0, "6–7": 0, "8+": 0 } as Record<string, number>,
+    ft: { ontime: 0, late: 0, today: 0, upcoming: 0, overdue: 0, no_deadline: 0 } as Record<string, number>,
+    fu: { today: 0, upcoming: 0, overdue: 0, unverified: 0, complete: 0 } as Record<string, number> };
   for (const f of list) {
     const d = leadDimensions(f, today, rules);
     if (f.touchesSinceEligibility > 0) c.touched++;
@@ -119,6 +125,9 @@ export function dimCounts(list: LeadFact[], today: string, rules: Rules) {
     if (f.touchesSinceEligibility > 0 && d.health === "overdue") c.followOverdue++;
     if (f.touchesSinceEligibility > 0 && d.health === "due_today") c.followDue++;
     c.health[d.health]!++; c.depth[d.depth]!++;
+    const t = outreachTimeliness(f, today, rules);
+    if (t.firstTouch) c.ft[t.firstTouch]!++;
+    if (t.followUp) c.fu[t.followUp]!++;
   }
   return c;
 }
@@ -166,6 +175,7 @@ export function overview(facts: LeadFact[], q: URLSearchParams, today: string, r
     depth: Object.fromEntries(sdrTable(rows, nf).map((s) => [s.ownerId, sdrDepth(rows, s.ownerId, rules, "eligibility", nf.quarterRange).all])),
     touchTarget: rules.touchTarget,
     // Three independent dimensions per SDR, all on the same population as the drill-downs (eligible leads, filtered).
+    dimsAll: dimCounts(rows.filter((f) => f.eligible), today, rules),
     dims: Object.fromEntries(sdrTable(rows, nf).map((sd) => [sd.ownerId, dimCounts(rows.filter((f) => f.eligible && f.sdrOwnerId === sd.ownerId), today, rules)])),
     scorecardTargets: rules.scorecardTargets, slaStartDate: rules.slaStartDate ?? null,
     dealContext: dealContext(rows, today),
