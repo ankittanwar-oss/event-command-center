@@ -558,13 +558,16 @@ export type AccountBucket = (typeof ACCOUNT_BUCKETS)[number]["key"];
 
 type CItem = ReturnType<typeof contactWorklist>["items"][number];
 
-export function accountWorklist(items: CItem[]) {
+export function accountWorklist(items: CItem[], today?: string, rules?: Rules) {
   const by = new Map<string, CItem[]>();
   for (const i of items) { const k = i.companyId ?? `contact:${i.contactId}`; (by.get(k) ?? by.set(k, []).get(k)!).push(i); }
   const order: Record<string, number> = { respond: 0, follow_up: 1, first_outreach: 2, review: 3, progress: 4, low: 5, qualified: 6, paused: 7 };
   const accounts = [...by.entries()].map(([key, cs]) => {
     const worked = cs.filter((c) => c.yourTouches > 0);
     const isWorked = worked.length > 0;
+    const lastSdr = cs.map((c) => c.yourLastTouchAt).filter(Boolean).sort().pop() ?? null;
+    const accountDays = lastSdr && today && rules ? businessDaysBetween(toDate(lastSdr)!, today, rules.businessCalendar)
+      : (() => { const v = worked.map((c) => c.daysSinceTouch).filter((x): x is number => x !== null && x !== undefined); return v.length ? Math.min(...v) : null; })();
     const has = (g: string, list: CItem[] = cs) => list.some((c) => c.group === g);
     const companyDisp = cs.map((c) => c.companyDisposition).find(Boolean) ?? null;
     let bucket: AccountBucket;
@@ -573,8 +576,10 @@ export function accountWorklist(items: CItem[]) {
     else if (has("qualified")) bucket = "qualified";
     else if (!isWorked) bucket = has("first_outreach") ? "first_outreach" : has("review") ? "review" : has("low") ? "low"
       : cs.every((c) => c.group === "paused") ? "paused" : "progress";
-    else if (has("follow_up", worked)) bucket = "follow_up";
+    // ACCOUNT recency = the selected SDR's latest qualifying outreach to ANY contact (never the stalest contact).
+    else if (accountDays !== null && accountDays < 7) bucket = worked.every((c) => c.group === "paused") ? "paused" : "progress";
     else if (worked.every((c) => c.group === "paused") && !has("progress")) bucket = "paused";
+    else if (has("follow_up", worked) || has("progress", worked)) bucket = accountDays !== null && accountDays >= 7 ? "follow_up" : "progress";
     else if (has("review", worked)) bucket = "review";
     else bucket = "progress";
     // Within a worked account, untouched contacts are optional multithreading, not "first outreach" for the account.
@@ -582,10 +587,20 @@ export function accountWorklist(items: CItem[]) {
     contacts.sort((a, b) => (order[a.group] ?? 9) - (order[b.group] ?? 9) || a.sort - b.sort);
     const top = contacts.find((c) => !(c as any).multithread && c.group !== "paused") ?? contacts[0]!;
     const count = (g: string) => cs.filter((c) => c.group === g).length;
-    const lastSdr = cs.map((c) => c.yourLastTouchAt).filter(Boolean).sort().pop() ?? null;
-    const sinces = worked.map((c) => c.daysSinceTouch).filter((x): x is number => x !== null && x !== undefined);
-    const daysSinceLast = sinces.length ? Math.min(...sinces) : null;
+    const daysSinceLast = isWorked ? accountDays : null;
+    // Account-level primary status (independent of individual contacts' recency).
+    const bd = (n: number) => `${n} business day${n === 1 ? "" : "s"} ago`;
+    let primary: { action: string; reason: string; color: ActionColor };
+    if (bucket === "respond" || bucket === "first_outreach" || bucket === "review" || bucket === "low" || bucket === "qualified") primary = { action: top.action, reason: top.reason, color: top.color };
+    else if (bucket === "paused") primary = { action: companyDisp ? "Paused company-wide" : "No routine outreach", reason: companyDisp?.reason ?? "Every worked contact is paused", color: "grey" };
+    else if (daysSinceLast === null) primary = { action: top.action, reason: top.reason, color: top.color };
+    else if (daysSinceLast < 7) primary = { action: "Recently contacted", reason: `Last account outreach ${bd(daysSinceLast)}`, color: "green" };
+    else primary = { action: daysSinceLast >= 30 ? "No activity in 30+ business days" : daysSinceLast >= 14 ? "Stale activity · follow-up opportunity" : "Follow-up opportunity", reason: `Last account outreach ${bd(daysSinceLast)}`, color: "grey" };
+    // Secondary, informational opportunities inside the account.
+    const inactive30 = worked.filter((c) => (c.daysSinceTouch ?? 0) >= 30 && c.group !== "paused").length;
+    const opportunities = [inactive30 ? `${inactive30} contact${inactive30 === 1 ? "" : "s"} inactive 30+ business days` : null, cs.length - worked.length ? `${cs.length - worked.length} contact${cs.length - worked.length === 1 ? "" : "s"} not worked` : null].filter(Boolean).join(" · ");
     return {
+      primary, opportunities,
       daysSinceLast, slaBreach: !isWorked && cs.some((c) => c.group === "first_outreach" && c.color === "red"),
       overdueCommitment: cs.some((c) => c.group === "respond" && c.color === "red"),
       key, companyId: cs[0]!.companyId, companyName: cs[0]!.companyName ?? cs[0]!.contactName, intent: cs[0]!.intent, sdrOwnerId: cs[0]!.sdrOwnerId, sdrName: cs[0]!.sdrName,

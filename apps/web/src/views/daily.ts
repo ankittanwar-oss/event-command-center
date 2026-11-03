@@ -144,9 +144,9 @@ export async function dailyView(route: Route, meta: any): Promise<HTMLElement> {
           h("div", { class: "faint awhy" }, intentWhy(a.intent))),
         h("div", { class: "astat" }, h("div", null, h("span", { class: `wk ${a.worked ? "y" : "n"}` }, status), ` · ${a.coverage.worked}/${a.coverage.available} contacts worked`),
           h("div", { class: "faint" }, a.lastSdrTouch ? `Last contacted ${fmt.day(a.lastSdrTouch)}${a.daysSinceLast !== null && a.daysSinceLast !== undefined ? ` · ${a.daysSinceLast} bd ago` : ""}` : "Not contacted by the SDR yet", !f.sdr && a.sdrName ? ` · ${a.sdrName}` : "")),
-        h("div", { class: "aact" }, h("div", { class: "cact" }, a.bucket === "paused" ? "No routine outreach" : a.bucket === "progress" && a.coverage.notWorked ? `On track · ${a.coverage.notWorked} more contact${a.coverage.notWorked === 1 ? "" : "s"} available` : t.action,
-          t.overdueBusinessDays && a.bucket !== "paused" ? h("span", { class: "ctime" }, ` · ${t.overdueBusinessDays} bd overdue`) : null),
-          h("div", { class: "faint" }, secondary))),
+        h("div", { class: "aact" }, h("div", { class: `cact ac-${a.primary.color}` }, a.primary.action,
+          a.bucket === "respond" && t.overdueBusinessDays ? h("span", { class: "ctime" }, ` · ${t.overdueBusinessDays} bd overdue`) : null),
+          h("div", { class: "faint" }, a.opportunities || secondary))),
       body);
     return el;
   };

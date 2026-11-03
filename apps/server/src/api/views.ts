@@ -228,8 +228,8 @@ export function overview(facts: LeadFact[], q: URLSearchParams, today: string, r
     // Account-level execution (primary). Accounts = unique HubSpot company ids per SDR; contacts = eligible event contacts.
     accountExec: (() => {
       const items = contactWorklist(rows, today, rules, disp).items;
-      const per = sdrTable(rows, nf).map((sd) => ({ ownerId: sd.ownerId, name: sd.name, ...accountSummary(accountWorklist(items.filter((i) => i.sdrOwnerId === sd.ownerId))) })).filter((r) => r.accounts > 0);
-      return { perSdr: per, all: accountSummary(accountWorklist(items)), dispositionCodes: DISPOSITION_CODES };
+      const per = sdrTable(rows, nf).map((sd) => ({ ownerId: sd.ownerId, name: sd.name, ...accountSummary(accountWorklist(items.filter((i) => i.sdrOwnerId === sd.ownerId), today, rules)) })).filter((r) => r.accounts > 0);
+      return { perSdr: per, all: accountSummary(accountWorklist(items, today, rules)), dispositionCodes: DISPOSITION_CODES };
     })(),
     missingOwner: rows.filter((f) => cmoKeys(f, today, rules).includes("x_missing_owner")).length,
     performanceColors: rules.performanceColors ?? DEFAULT_RULES.performanceColors, inactivityDays: rules.inactivityBusinessDays ?? 14,
@@ -457,7 +457,7 @@ export function daily(facts: LeadFact[], q: URLSearchParams, today: string, rule
       own: i.ownership ? { companySdr: ownerLabel(i.ownership.companySdrId, rules), companyOwner: ownerLabel(i.ownership.companyOwnerId, rules), contactOwner: ownerLabel(i.ownership.contactOwnerId, rules), contactSdr: ownerLabel(i.ownership.contactSdrId, rules), companyCount: i.ownership.companyCount } : null,
       lastBy: ownerLabel(i.lastOutboundOwnerId, rules), otherBy: ownerLabel(i.lastOtherSdrTouch?.ownerId ?? null, rules), dealOwner: ownerLabel(i.deal?.ownerId ?? null, rules) })) };
   // Account-first view (same contact items, grouped by HubSpot company id within each SDR).
-  const acctList = accountWorklist(contacts.items as any);
+  const acctList = accountWorklist(contacts.items as any, today, rules);
   const accountsOut = { buckets: ACCOUNT_BUCKETS, summary: accountSummary(acctList), dispositionCodes: DISPOSITION_CODES,
     window: "Account worked = at least one qualifying outreach by the current SDR to an eligible event contact, since that contact's event date (including before a later allocation date). Other reps' outreach is shown, never credited.",
     items: acctList.map((a) => ({ ...a, companyDispositionLabel: a.companyDisposition ? DISPOSITION_CODES[a.companyDisposition.code] : null })) };
@@ -476,11 +476,11 @@ export function accountDrill(facts: LeadFact[], q: URLSearchParams, today: strin
   const { nf, rows } = filtered(facts, q, today);
   let items = contactWorklist(rows, today, rules, disp).items;
   if (rowSdr) items = items.filter((i) => i.sdrOwnerId === rowSdr);
-  const accts = accountWorklist(items).filter(def.test).map((a) => {
+  const accts = accountWorklist(items, today, rules).filter(def.test).map((a) => {
     const contacts = def.contactsOnly ? a.contacts.filter(def.contactsOnly) : a.contacts;
     return {
       key: a.key, companyId: a.companyId, companyName: a.companyName, intent: a.intent, sdrName: a.sdrName, bucket: a.bucket, worked: a.worked, daysSinceLast: a.daysSinceLast,
-      coverage: a.coverage, lastSdrTouch: a.lastSdrTouch, top: { action: a.top.action, color: a.top.color, overdueBusinessDays: a.top.overdueBusinessDays },
+      coverage: a.coverage, lastSdrTouch: a.lastSdrTouch, top: { action: a.primary.action, color: a.primary.color, overdueBusinessDays: a.top.overdueBusinessDays }, opportunities: a.opportunities,
       companyDisposition: a.companyDisposition,
       events: [...new Map(a.contacts.flatMap((c) => c.events).map((e) => [e.id, e])).values()],
       contacts: contacts.map((c) => ({ contactId: c.contactId, contactName: c.contactName, jobTitle: c.jobTitle, group: c.group, action: (c as any).multithread ? "Optional: multithread" : c.action,

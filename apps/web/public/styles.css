@@ -586,3 +586,4 @@ details.moresec > summary { cursor: pointer; font-weight: 600; padding: 8px 0; o
 .dform input, .dform select { width: 100%; box-sizing: border-box; }
 @media (prefers-color-scheme: dark) { .adisp { background: #2a2d33; } .wk.y { color: #75e0a7; } }
 .drillhead { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; } .adrill .rectools { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; } .adrill .rectools input { flex: 1 1 200px; } .adrill .ahead { grid-template-columns: 12px minmax(0, 2fr) minmax(0, 1.2fr) minmax(0, 1.2fr); }
+.cact.ac-red { color: #b42318; } .cact.ac-amber { color: #b54708; } .cact.ac-green { color: #067647; } .cact.ac-grey { color: #475467; }

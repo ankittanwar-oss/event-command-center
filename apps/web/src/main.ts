@@ -146,7 +146,7 @@ async function render() {
     h("aside", { class: "sidebar" },
       h("div", { class: "brand" }, "Events Command Center", h("small", null, "SpotDraft · event follow-up")),
       nav,
-      h("div", { class: "foot" }, `${fmt.n(meta.leadCount)} registrations · as of ${meta.today}`)),
+      h("div", { class: "foot" }, `${fmt.n(meta.leadCount)} registrations · as of ${meta.today} · ${meta.build ?? "build unknown"}`)),
     h("main", { class: "main" },
       h("div", { class: "topbar" }, h("span", { class: "title" }, view.title), view.filters ? filterBar(route) : null, freshnessBadge()),
       content)));

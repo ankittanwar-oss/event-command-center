@@ -225,7 +225,7 @@ describe("account-first execution and dispositions", () => {
     assert.equal(a!.worked, true);
     assert.equal(a!.coverage.available, 4); assert.equal(a!.coverage.worked, 3); assert.equal(a!.coverage.paused, 1);
     assert.notEqual(a!.bucket, "first_outreach");
-    assert.equal(a!.bucket, "follow_up"); // c3 is overdue for follow-up
+    assert.equal(a!.bucket, "progress"); // c1 was contacted on 30 Oct: the ACCOUNT is recent even though c3 is older
     const c2 = a!.contacts.find((c: any) => c.contactId === "c2")! as any;
     assert.ok(c2.multithread || c2.group === "review"); // untouched stakeholder: never makes the account "first outreach"
     assert.equal(a!.companyDisposition, null); // a contact disposition never closes the account
@@ -304,4 +304,24 @@ test("first-touch SLA with the policy defaults: Hot 2, Warm 4 business days, eff
   // before the effective date: no breach
   const old = computeLeadFacts(dataset({ events: [event({ date: "2026-10-20" })], companies: [company({ allocationDate: "2026-10-20" })] }), P, "2026-11-09")[0]!;
   assert.equal(old.firstTouchOverdue, false);
+});
+
+test("Link Logistics pattern: account recency = latest SDR touch to ANY contact; stale contacts stay contact-level", async () => {
+  const { contactWorklist, accountWorklist, accountSummary, ACCOUNT_METRICS } = await import("../src/index.js");
+  const NOV = "2026-11-03";
+  const ds = dataset({ events: [event({ date: "2026-09-01" })], companies: [company({ allocationDate: "2026-09-01" })],
+    contacts: [contact({ id: "k" }), contact({ id: "b" }), contact({ id: "m" }), contact({ id: "w" })],
+    links: [["e1", "k"], ["e1", "b"], ["e1", "m"], ["e1", "w"]],
+    acts: [act({ ts: "2026-09-14", contactIds: ["k"], companyIds: [] }), act({ ts: "2026-09-16", contactIds: ["b"], companyIds: [] }), act({ ts: "2026-10-29", contactIds: ["m"], companyIds: [] })] });
+  const items = contactWorklist(computeLeadFacts(ds, R, NOV), NOV, R).items;
+  const a = accountWorklist(items, NOV, R)[0]!;
+  assert.equal(a.lastSdrTouch!.slice(0, 10), "2026-10-29");
+  assert.equal(a.daysSinceLast, 3);
+  assert.equal(a.coverage.worked, 3); assert.equal(a.coverage.available, 4);
+  assert.equal(a.bucket, "progress"); assert.equal(a.primary.action, "Recently contacted");
+  assert.match(a.opportunities, /2 contacts inactive 30\+ business days · 1 contact not worked/);
+  const k = a.contacts.find((c: any) => c.contactId === "k")!;
+  assert.equal(k.group, "follow_up"); assert.match(k.action, /30\+/);   // contact-level status kept
+  assert.equal(ACCOUNT_METRICS.stale14!.test(a), false);
+  assert.equal(accountSummary([a]).stale14, 0);
 });
