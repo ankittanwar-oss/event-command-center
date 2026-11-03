@@ -161,7 +161,7 @@ export function dimCounts(list: LeadFact[], today: string, rules: Rules) {
     health: { overdue: 0, due_today: 0, upcoming: 0, not_yet_due: 0, on_track: 0, unverified: 0 } as Record<string, number>,
     depth: { "0": 0, "1": 0, "2–3": 0, "4–5": 0, "6–7": 0, "8+": 0 } as Record<string, number>,
     ft: { ontime: 0, late: 0, today: 0, upcoming: 0, overdue: 0, no_deadline: 0 } as Record<string, number>,
-    fu: { today: 0, upcoming: 0, overdue: 0, unverified: 0, complete: 0 } as Record<string, number>,
+    fu: { today: 0, upcoming: 0, overdue: 0, unverified: 0, complete: 0, open: 0 } as Record<string, number>,
     k: {} as Record<string, number> };
   for (const f of list) {
     const d = leadDimensions(f, today, rules);
@@ -479,7 +479,7 @@ export function accountDrill(facts: LeadFact[], q: URLSearchParams, today: strin
   const accts = accountWorklist(items).filter(def.test).map((a) => {
     const contacts = def.contactsOnly ? a.contacts.filter(def.contactsOnly) : a.contacts;
     return {
-      key: a.key, companyId: a.companyId, companyName: a.companyName, intent: a.intent, sdrName: a.sdrName, bucket: a.bucket, worked: a.worked,
+      key: a.key, companyId: a.companyId, companyName: a.companyName, intent: a.intent, sdrName: a.sdrName, bucket: a.bucket, worked: a.worked, daysSinceLast: a.daysSinceLast,
       coverage: a.coverage, lastSdrTouch: a.lastSdrTouch, top: { action: a.top.action, color: a.top.color, overdueBusinessDays: a.top.overdueBusinessDays },
       companyDisposition: a.companyDisposition,
       events: [...new Map(a.contacts.flatMap((c) => c.events).map((e) => [e.id, e])).values()],

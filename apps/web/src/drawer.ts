@@ -90,7 +90,6 @@ function dimSummary(rows: any[]) {
   return h("div", { class: "dims" },
     line("First touch", tally("sla")),
     line("Follow-up", tally("followUp", (v) => v.replace(/ \(.*$/, ""))),
-    line("Cadence", tally("cadence", (v) => v.startsWith("Cadence incomplete") ? "Incomplete" : "Complete")),
     line("Deadline", tally("deadlineLabel")));
 }
 

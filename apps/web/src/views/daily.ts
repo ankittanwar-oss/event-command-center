@@ -30,9 +30,9 @@ const who = (o: any) => (o ? `${o.name ?? "Unknown user"}${o.role ? ` (${o.role}
 const BUCKETS = [
   { key: "respond", label: "Respond now", hint: "A prospect replied, or a HubSpot task is due" },
   { key: "first_outreach", label: "First outreach", hint: "Account not worked yet" },
-  { key: "follow_up", label: "Follow up", hint: "Worked; a further touch is due with an active contact" },
+  { key: "follow_up", label: "Follow-up opportunities", hint: "Worked; no SDR outreach for 7+ business days. No deadline: you decide" },
   { key: "review", label: "Needs review", hint: "Missing or contradictory data" },
-  { key: "progress", label: "Up to date / in progress", hint: "Worked; nothing due now (multithreading optional)" },
+  { key: "progress", label: "In progress", hint: "Contacted recently, in conversation, or a task scheduled" },
   { key: "paused", label: "Paused / closed", hint: "Verified company-wide disposition, or every worked contact paused" },
   { key: "low", label: "Lower priority", hint: "Not worked; Cold intent, no verified engagement" },
   { key: "qualified", label: "Qualified / handed off", hint: "Verified SQL; no outstanding SDR action" },
@@ -76,7 +76,7 @@ export async function dailyView(route: Route, meta: any): Promise<HTMLElement> {
   const stat = (v: any, l: string, sub?: string) => h("div", { class: "pt" }, h("b", null, typeof v === "number" ? fmt.n(v) : v), h("span", null, l), sub ? h("small", null, sub) : null);
   const progress = h("div", { class: "ptrack" },
     h("div", { class: "pg main" }, h("div", { class: "pgt" }, "Accounts"), stat(accounts.length, "assigned & eligible"), stat(accWorked, "worked", pct(accWorked, accounts.length) + " coverage"),
-      stat(accounts.length - accWorked, "not worked"), stat(accounts.filter((a) => a.bucket === "follow_up").length, "need follow-up"),
+      stat(accounts.length - accWorked, "not worked"), stat(accounts.filter((a) => a.bucket === "follow_up").length, "follow-up opportunities"),
       stat(accounts.filter((a) => a.conversation).length, "in conversation"), stat(accounts.filter((a) => a.bucket === "paused").length, "paused / closed"), stat(accounts.filter((a) => a.bucket === "qualified").length, "qualified")),
     h("div", { class: "pg" }, h("div", { class: "pgt" }, "Eligible event contacts"), stat(base.length, "contacts"), stat(touched, "worked", pct(touched, base.length)), stat(two, "2+ touches"), stat(week, "touched last 7 days")));
 
@@ -143,7 +143,7 @@ export async function dailyView(route: Route, meta: any): Promise<HTMLElement> {
         h("div", { class: "aname" }, h("b", null, a.companyName ?? "(no company)"), " ", a.companyId ? h("span", { onclick: (e: Event) => e.stopPropagation() }, hsLink("company", a.companyId)) : null, " ", intentPill(a.intent),
           h("div", { class: "faint awhy" }, intentWhy(a.intent))),
         h("div", { class: "astat" }, h("div", null, h("span", { class: `wk ${a.worked ? "y" : "n"}` }, status), ` · ${a.coverage.worked}/${a.coverage.available} contacts worked`),
-          h("div", { class: "faint" }, a.lastSdrTouch ? `Last SDR touch ${fmt.day(a.lastSdrTouch)}` : "No SDR touch yet", !f.sdr && a.sdrName ? ` · ${a.sdrName}` : "")),
+          h("div", { class: "faint" }, a.lastSdrTouch ? `Last contacted ${fmt.day(a.lastSdrTouch)}${a.daysSinceLast !== null && a.daysSinceLast !== undefined ? ` · ${a.daysSinceLast} bd ago` : ""}` : "Not contacted by the SDR yet", !f.sdr && a.sdrName ? ` · ${a.sdrName}` : "")),
         h("div", { class: "aact" }, h("div", { class: "cact" }, a.bucket === "paused" ? "No routine outreach" : a.bucket === "progress" && a.coverage.notWorked ? `On track · ${a.coverage.notWorked} more contact${a.coverage.notWorked === 1 ? "" : "s"} available` : t.action,
           t.overdueBusinessDays && a.bucket !== "paused" ? h("span", { class: "ctime" }, ` · ${t.overdueBusinessDays} bd overdue`) : null),
           h("div", { class: "faint" }, secondary))),
@@ -201,7 +201,8 @@ async function details(i: any) {
   box.append(
     h("div", { class: `nextbox c-${i.color}` },
       h("div", { class: "na" }, i.action), h("div", { class: "nr" }, i.reason),
-      h("div", { class: "faint" }, [i.due ? `Due ${fmt.day(i.due)}` : null, `SDR: ${i.sdrName ?? "not assigned"}${i.sdrSource === "pod_ae" ? " (via AE pod)" : ""}`, i.allocationDate ? `allocated ${fmt.day(i.allocationDate)}` : null].filter(Boolean).join(" · ")),
+      i.historicalDue ? h("div", { class: "faint" }, `Earlier missed step: due ${fmt.day(i.historicalDue)} — fulfilled by a later touch (history only)`) : null as any,
+      h("div", { class: "faint" }, [i.due ? `Next deadline ${fmt.day(i.due)}` : "No verified deadline", `SDR: ${i.sdrName ?? "not assigned"}${i.sdrSource === "pod_ae" ? " (via AE pod)" : ""}`, i.allocationDate ? `allocated ${fmt.day(i.allocationDate)}` : null].filter(Boolean).join(" · ")),
       h("div", { class: "nlinks" }, hsLink("contact", i.contactId, "Contact in HubSpot ↗"), " ", hsLink("company", i.companyId, "Company ↗"), i.contactEmail ? h("span", { class: "faint" }, ` · ${i.contactEmail}`) : null)),
     // 1. ACCOUNT INTENT (company level, current)
     sec("Account intent · company", h("div", { class: "kv tight" },

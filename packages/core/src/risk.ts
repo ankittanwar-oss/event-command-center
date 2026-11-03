@@ -38,13 +38,12 @@ export function riskOf(f: LeadFact, rules: Rules): { level: RiskLevel; reason: s
       if (f.firstTouchOverdue) return { level: "critical", reason: "First-touch SLA breached, no outreach" };
       if ((f.businessDaysSinceEligibility ?? 0) >= sla) return { level: "at_risk", reason: "First touch due today" };
       return { level: "neutral", reason: "Inside first-touch window" };
+    // Policy: only the first-touch SLA is mandatory. After first outreach the SDR owns follow-up timing, so long gaps
+    // and fewer touches than the 6–7 guideline are shown as information, never as critical / at risk.
     case "stalled":
-      return { level: "critical", reason: f.statusReason };
+      return { level: "neutral", reason: `Worked; ${f.statusReason.toLowerCase()} (informational, no follow-up SLA)` };
     case "first_touch":
-      if (f.insufficientFollowUp) {
-        return { level: "at_risk", reason: f.touchesSinceEligibility === 1 ? "One touch only; further outreach is due" : "Below expected cadence for its age" };
-      }
-      return { level: "neutral", reason: "Early in cadence; next touch not yet due" };
+      return { level: "neutral", reason: "Worked; follow-up timing is up to the SDR" };
     case "active":
       return { level: "healthy", reason: f.statusReason };
     case "in_play":
@@ -144,7 +143,7 @@ export function findings(rows: LeadFact[], rules: Rules, limit = 5): Finding[] {
         drill: { bucket: "overdue", patch: { temperature: temp } },
       });
     }
-    const stalled = t.filter((f) => f.status === "stalled");
+    const stalled: LeadFact[] = []; // follow-up gaps are informational (no follow-up SLA), so no finding
     if (stalled.length) {
       const s = sdrLine(stalled);
       out.push({
@@ -154,7 +153,7 @@ export function findings(rows: LeadFact[], rules: Rules, limit = 5): Finding[] {
         drill: { bucket: "stalled", patch: { temperature: temp } },
       });
     }
-    const oneTouch = t.filter((f) => f.status === "first_touch" && f.insufficientFollowUp && f.touchesSinceEligibility === 1);
+    const oneTouch: LeadFact[] = []; // the 6–7 touch cadence is guidance, not a requirement
     if (oneTouch.length) {
       const s = sdrLine(oneTouch);
       out.push({

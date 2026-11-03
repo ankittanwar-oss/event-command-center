@@ -281,7 +281,10 @@ export function computeLeadFact(
   const noSla = status === "recently_lost" || (!!rules.slaStartDate && !!eligibilityDate && eligibilityDate < rules.slaStartDate);
   // The SLA start date only governs the FIRST-touch SLA. Follow-up cadence is judged for every worked lead
   // (except recently-lost accounts), otherwise a one-touch lead would read "not yet due" while below cadence.
-  const insufficient = eligible && sinceElig.length > 0 && !inPlayReason && status !== "recently_lost" && (sinceElig.length < expected || status === "stalled");
+  // Behind the expected-touch curve only counts once the follow-up interval since the LATEST touch has passed:
+  // a recent touch fulfils the current cadence step (no stale "due since" deadlines).
+  const recentTouch = bizSinceLast !== null && bizSinceLast < 5;
+  const insufficient = eligible && sinceElig.length > 0 && !inPlayReason && status !== "recently_lost" && ((sinceElig.length < expected && !recentTouch) || status === "stalled");
 
   const icpPriority = !!tier && PRIORITY_TIERS.has(tier);
   let priority = 0;

@@ -25,6 +25,7 @@ export interface CadenceRule {
   firstTouchBusinessDays: number;
   /** A lead with no touch for this many business days (after starting) is "Follow-Up Stalled". */
   stallBusinessDays: number;
+
   /** Expected cumulative touches by lead age (calendar days since eligibility). Linear between checkpoints. */
   cadence: Array<{ day: number; touches: number }>;
   /** Touch count at which a lead with no response is flagged for intervention. */
@@ -129,7 +130,7 @@ export const DEFAULT_RULES: Rules = {
   excludedCompanies: ["The Channel Company"],
   requireHotWarm: false,
   minEventDate: "2026-08-01",
-  slaStartDate: "2026-10-30",
+  slaStartDate: "2026-11-01",
   performanceColors: { coverageTarget: 80, followUpTarget: 50, amberFraction: 0.75 },
   inactivityBusinessDays: 14,
   conversationRecencyDays: 30,

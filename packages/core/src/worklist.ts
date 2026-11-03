@@ -16,7 +16,7 @@ export const WORK_SECTIONS = [
 ] as const;
 export type WorkSection = (typeof WORK_SECTIONS)[number]["key"];
 
-export type WorkAction = "Respond" | "Send first outreach" | "Follow up" | "Complete HubSpot task" | "Monitor" | "Paused" | "Review next step" | "Needs review";
+export type WorkAction = "Follow-up opportunity" | "Respond" | "Send first outreach" | "Follow up" | "Complete HubSpot task" | "Monitor" | "Paused" | "Review next step" | "Needs review";
 
 export interface WorkItem {
   section: WorkSection;
@@ -26,6 +26,7 @@ export interface WorkItem {
   dueSource: "reply" | "task" | "sla" | "cadence" | null;
   overdueBusinessDays: number | null;
   lead: LeadFact;
+  historicalDue?: string | null;    // an earlier cadence step that was missed but later fulfilled (context only)
 }
 
 const ORDER: Record<WorkSection, number> = { respond: 0, overdue: 1, today: 2, stale: 3, upcoming: 4, monitor: 5 };
@@ -102,22 +103,12 @@ export function leadWork(f: LeadFact, today: string, rules: Rules): WorkItem {
     return item(p.section, "Send first outreach", `${f.temperature ?? "Temp not set"} lead, no SDR touch since ${f.eligibilityDate}`, due, "sla", p.overdue);
   }
 
-  // 5. Worked: two existing rules, kept consistent with the rest of the app:
-  //    - follow-up DUE once the lead falls below the configured expected-touches curve for its age (existing
-  //      insufficientFollowUp / "at risk" rule);
-  //    - follow-up OVERDUE once the gap since the last touch exceeds the stall threshold (existing "stalled" rule).
-  //    Fewer than 6–7 touches alone never makes a lead overdue.
-  const target = rules.touchTarget?.bandMax ?? 7;
-  // 6–7 touches is the expected cadence, not a maximum: follow-up continues on the same timing rules after it.
+  // 5. Worked. Policy: the first-touch SLA is the ONLY mandatory cadence. After first outreach the SDR owns follow-up
+  //    timing: no automatic follow-up due dates, no cadence overdue. We only report how long it has been.
   const last = toDate(f.lastTouchAt);
-  if (!last) return item("monitor", "Needs review", "Follow-up timing unverified (last touch date unknown)");
-  const stallDue = addBusinessDays(last, rule.stallBusinessDays + 1, rules);
-  const cadDue = cadenceDue(f, rule);
-  const why = `Next is touch ${f.touchesSinceEligibility + 1} (target ${rules.touchTarget?.minimum ?? 6}–${target}); last touch ${last}`;
-  if (stallDue <= today) return item("overdue", "Follow up", why, stallDue, "cadence", Math.max(1, businessDaysBetween(stallDue, today, rules.businessCalendar)));
-  if (cadDue && cadDue <= today) return item("today", "Follow up", `${why}; below expected cadence since ${cadDue}`, cadDue, "cadence");
-  const due = cadDue && cadDue < stallDue ? cadDue : stallDue;
-  return item("upcoming", "Follow up", why, due, "cadence");
+  if (!last) return item("monitor", "Needs review", "Last qualifying touch date unknown");
+  const bdSince = businessDaysBetween(last, today, rules.businessCalendar);
+  return item("monitor", "Follow-up opportunity", `Last SDR touch ${last} (${bdSince} business day${bdSince === 1 ? "" : "s"} ago) · ${f.touchesSinceEligibility} touch${f.touchesSinceEligibility === 1 ? "" : "es"} (6–7 recommended)`);
 }
 
 /** First day the lead falls below the configured expected-touches curve, given its current touch count. */
@@ -149,16 +140,18 @@ export function leadDimensions(f: LeadFact, today: string, rules: Rules) {
     if (w.section === "respond") followUp = "Reply awaiting response";
     else if (w.action === "Complete HubSpot task") followUp = w.section === "overdue" ? `HubSpot task overdue (${w.overdueBusinessDays} bd)` : w.section === "today" ? "HubSpot task due today" : `HubSpot task due ${w.due}`;
     else if (w.action === "Follow up") followUp = w.section === "overdue" ? `Follow-up overdue (${w.overdueBusinessDays} bd)` : w.section === "today" ? "Follow-up due" : `Follow-up not yet due (by ${w.due})`;
+    else if (w.action === "Follow-up opportunity") followUp = "Follow-up opportunity (no deadline)";
     else if (w.action === "Review next step") followUp = "Cadence complete – review";
     else followUp = `Follow-up timing unverified (${w.why})`;
   }
-  const cadence = !f.eligible ? null : t >= min ? `Cadence ${t}/${min}–${max} complete` : `Cadence incomplete (${t}/${min}–${max})`;
+  const cadence = !f.eligible ? null : `${t} touch${t === 1 ? "" : "es"} (${min}–${max} recommended)`;
   // action health (mutually exclusive)
   let health: ActionHealth;
   const fiveBd = addBusinessDays(today, 5, rules);
   if (w.section === "overdue" || (w.section === "respond" && w.due! < today)) health = "overdue";
   else if (w.section === "today" || w.section === "respond") health = "due_today";
   else if (w.section === "upcoming") health = w.due && w.due <= fiveBd ? "upcoming" : "not_yet_due";
+  else if (w.action === "Follow-up opportunity") health = "not_yet_due";
   else if (w.action === "Review next step" || (w.action === "Monitor" && contactLevelInPlay(f))) health = "on_track";
   else health = "unverified";
   return { sla, depth, followUp, cadence, health, work: w };
@@ -253,12 +246,13 @@ export function outreachTimeliness(f: LeadFact, today: string, rules: Rules) {
   else if (f.status === "never_worked" && f.firstTouchOverdue) firstTouch = "overdue";
   else if (w.action === "Send first outreach") firstTouch = w.section === "today" ? "today" : w.section === "upcoming" ? "upcoming" : w.section === "overdue" ? "overdue" : "no_deadline";
   else firstTouch = "no_deadline";
-  let followUp: "today" | "upcoming" | "overdue" | "unverified" | "complete" | null = null;
+  let followUp: "today" | "upcoming" | "overdue" | "unverified" | "complete" | "open" | null = null;
   if (f.touchesSinceEligibility > 0) {
     if (w.section === "overdue") followUp = "overdue";
     else if (w.section === "today") followUp = "today";
     else if (w.section === "respond") followUp = w.due && w.due < today ? "overdue" : "today";
     else if (w.section === "upcoming") followUp = "upcoming";
+    else if (w.action === "Follow-up opportunity") followUp = "open";
     else if (w.action === "Review next step" || (w.action === "Monitor" && contactLevelInPlay(f))) followUp = "complete";
     else followUp = "unverified";
   }
@@ -343,12 +337,13 @@ export function actionStatus(f: LeadFact, today: string, rules: Rules, given?: W
       if (w.section === "overdue") return mk(`First outreach overdue by ${bd}`, "red", "Send first outreach", "sla");
       if (w.section === "today") return mk("First outreach due today", "amber", "Send first outreach", "sla");
       return mk(`First outreach due ${day(w.due)}`, "grey", "Send first outreach", "sla");
-    case "cadence":
-      if (w.section === "overdue") return mk(`Cadence follow-up overdue by ${bd}`, "red", `Follow up (touch ${f.touchesSinceEligibility + 1})`, "cadence");
-      if (w.section === "today") return mk(w.due === today ? "Cadence follow-up due today" : `Cadence follow-up due since ${day(w.due)}`, "amber", `Follow up (touch ${f.touchesSinceEligibility + 1})`, "cadence");
-      return mk(`On track · next follow-up by ${day(w.due)}`, "green", `Follow up by ${day(w.due)}`, "cadence");
+    case "cadence": break; // no longer produced: follow-up timing is SDR-owned
   }
   if (w.section === "stale") return mk("No touch in 14+ business days", "grey", f.touchesSinceEligibility === 0 ? "Send first outreach" : "Follow up", "none");
+  if (w.action === "Follow-up opportunity") {
+    const n2 = f.lastTouchAt ? businessDaysBetween(toDate(f.lastTouchAt)!, today, rules.businessCalendar) : 0;
+    return mk(`Last contacted ${n2} business day${n2 === 1 ? "" : "s"} ago`, n2 < 7 ? "green" : "grey", n2 >= 14 ? "Follow-up opportunity (no deadline)" : "Follow up when appropriate", "none");
+  }
   if (w.action === "Review next step") return mk(`Cadence complete (${f.touchesSinceEligibility} touches)`, "green", "Review next step", "none");
   if (w.action === "Monitor" && contactLevelInPlay(f) && f.touchesSinceEligibility > 0) {
     const r = f.inPlayReason ?? "";
@@ -381,7 +376,7 @@ export const CONTACT_GROUPS = [
 ] as const;
 export type ContactGroup = (typeof CONTACT_GROUPS)[number]["key"];
 
-export interface ContactAction { group: ContactGroup; action: string; reason: string; color: ActionColor; due: string | null; overdueBusinessDays: number | null; sort: number }
+export interface ContactAction { group: ContactGroup; action: string; reason: string; color: ActionColor; due: string | null; overdueBusinessDays: number | null; sort: number; historicalDue?: string | null }
 
 /** Why this contact matters, from verified evidence only. Sponsored-event attendance is not SpotDraft engagement. */
 export function engagementReason(f: LeadFact): { text: string; strength: number } {
@@ -430,6 +425,8 @@ export function activeConversation(f: LeadFact, today: string, rules: Rules): st
  *  D. SDR outreach: none -> First outreach; done -> Follow up when due; breached deadline -> red
  * An open deal without an SQL date is context only. Old replies/meetings never mean "in conversation".
  */
+const firstName = (f: LeadFact) => (f.sdrOwnerId ? rosterById.get(f.sdrOwnerId)?.name.split(" ")[0] : null) ?? "the SDR";
+
 export function contactAction(f0: LeadFact, today: string, rules: Rules, disp?: DispositionSet): ContactAction {
   // Re-derive the status from today's rules so stale snapshot labels (e.g. any open deal = "in play") cannot leak in.
   const conv = activeConversation(f0, today, rules);
@@ -451,7 +448,7 @@ export function contactAction(f0: LeadFact, today: string, rules: Rules, disp?: 
   const engaged = engagementReason(f).strength <= 1;
   const low = intent === "cold" && !engaged;          // C: no current intent and no verified engagement
   const mk = (group: ContactGroup, action: string, reason: string, color: ActionColor, sort: number): ContactAction =>
-    ({ group: low && (group === "first_outreach" || group === "follow_up") && color !== "red" ? "low" : group, action, reason, color: low && color === "amber" ? "grey" : color, due: w.due, overdueBusinessDays: w.overdueBusinessDays, sort: low ? sort + 20 : sort });
+    ({ group: low && (group === "first_outreach" || group === "follow_up") && color !== "red" ? "low" : group, action, reason, color: low && color === "amber" ? "grey" : color, due: w.due, overdueBusinessDays: w.overdueBusinessDays, sort: low ? sort + 20 : sort, historicalDue: w.historicalDue ?? null });
 
   // Verified contact disposition (dashboard-confirmed or structured HubSpot): no routine cadence alerts.
   // A new reply or an SDR task due still surfaces first (handled below only when no disposition applies to them).
@@ -479,13 +476,12 @@ export function contactAction(f0: LeadFact, today: string, rules: Rules, disp?: 
     return mk("first_outreach", "Send first outreach", `${temp} SLA: due by ${w.due}`, "amber", 4);
   }
   if (f.touchesSinceEligibility === 0) return mk("first_outreach", "Send first outreach", `No SLA deadline (eligible ${f.eligibilityDate}, before the SLA start)`, intent === "hot" || intent === "warm" ? "amber" : "grey", intent === "hot" ? 4 : intent === "warm" ? 5 : 6);
-  if (w.dueSource === "cadence") {
-    const next = `touch ${f.touchesSinceEligibility + 1}`;
-    if (w.section === "overdue") return mk("follow_up", "Send follow-up", `${next} · no touch for ${bd(ia.businessDays ?? 0)} (was due ${w.due})`, "red", 3);
-    if (w.section === "today") return mk("follow_up", "Send follow-up", `${next} · due ${w.due && w.due < today ? `since ${w.due}` : "today"}`, "amber", 4);
-    if (ia.stale) return mk("follow_up", "Send follow-up", `${next} · no touch for ${bd(ia.businessDays ?? 0)}`, "amber", 5);
-    // "Up to date" only with a verified reason: a recent SDR touch and the next one not yet due.
-    return mk("progress", "Next touch not due yet", `${next} due by ${w.due} · last SDR touch ${toDate(f.lastTouchAt)}`, "green", 9);
+  if (w.action === "Follow-up opportunity") {
+    // Informational only: no deadline, never red/amber. Recency bands are neutral guidance.
+    const n2 = ia.businessDays ?? 0;
+    const ago = `Last contacted ${n2} business day${n2 === 1 ? "" : "s"} ago by ${firstName(f)}`;
+    if (n2 < 7) return mk("progress", "Recently contacted", `${ago} · ${f.touchesSinceEligibility} touch${f.touchesSinceEligibility === 1 ? "" : "es"}`, "green", 9);
+    return mk("follow_up", n2 >= 30 ? "No activity in 30+ business days" : n2 >= 14 ? "Stale activity · follow-up opportunity" : "Follow-up opportunity", `${ago} · ${f.touchesSinceEligibility} touch${f.touchesSinceEligibility === 1 ? "" : "es"} (6–7 recommended, not required)`, "grey", n2 >= 14 ? 5 : 6);
   }
   return mk("review", "Check timing", w.why || "No reliable next step could be determined", "grey", 7);
 }
@@ -551,9 +547,9 @@ export function contactWorklist(rows: LeadFact[], today: string, rules: Rules, d
 export const ACCOUNT_BUCKETS = [
   { key: "respond", label: "Respond now", hint: "A prospect replied, or a HubSpot task is due" },
   { key: "first_outreach", label: "First outreach", hint: "Account not worked yet: no qualifying outreach by the SDR to any contact" },
-  { key: "follow_up", label: "Follow up", hint: "Worked; a further touch is due with an active contact" },
+  { key: "follow_up", label: "Follow-up opportunities", hint: "Worked, no recent SDR outreach (7+ business days). No deadline: the SDR decides" },
   { key: "review", label: "Needs review", hint: "Missing or contradictory data" },
-  { key: "progress", label: "Up to date / in progress", hint: "Worked; nothing due right now (multithreading optional)" },
+  { key: "progress", label: "In progress", hint: "Worked recently, in conversation, or a task scheduled" },
   { key: "paused", label: "Paused / closed", hint: "Verified company-wide disposition, or every worked contact is paused" },
   { key: "low", label: "Lower priority", hint: "Not worked; Cold intent and no verified engagement" },
   { key: "qualified", label: "Qualified / handed off", hint: "Verified SQL; no outstanding SDR action" },
@@ -587,7 +583,11 @@ export function accountWorklist(items: CItem[]) {
     const top = contacts.find((c) => !(c as any).multithread && c.group !== "paused") ?? contacts[0]!;
     const count = (g: string) => cs.filter((c) => c.group === g).length;
     const lastSdr = cs.map((c) => c.yourLastTouchAt).filter(Boolean).sort().pop() ?? null;
+    const sinces = worked.map((c) => c.daysSinceTouch).filter((x): x is number => x !== null && x !== undefined);
+    const daysSinceLast = sinces.length ? Math.min(...sinces) : null;
     return {
+      daysSinceLast, slaBreach: !isWorked && cs.some((c) => c.group === "first_outreach" && c.color === "red"),
+      overdueCommitment: cs.some((c) => c.group === "respond" && c.color === "red"),
       key, companyId: cs[0]!.companyId, companyName: cs[0]!.companyName ?? cs[0]!.contactName, intent: cs[0]!.intent, sdrOwnerId: cs[0]!.sdrOwnerId, sdrName: cs[0]!.sdrName,
       bucket, worked: isWorked, top, contacts, companyDisposition: companyDisp,
       coverage: {
@@ -609,7 +609,10 @@ export const ACCOUNT_METRICS: Record<string, { label: string; test: (a: Acct) =>
   eligible: { label: "Eligible accounts", test: () => true },
   worked: { label: "Accounts worked", test: (a) => a.worked },
   not_worked: { label: "Not worked", test: (a) => !a.worked },
-  need_follow_up: { label: "Need follow-up", test: (a) => a.bucket === "follow_up" },
+  need_follow_up: { label: "Follow-up opportunities", test: (a) => a.bucket === "follow_up" },
+  stale14: { label: "Worked, no outreach in 14+ business days", test: (a) => a.worked && (a.daysSinceLast ?? 0) >= 14 },
+  sla_breach: { label: "First-touch SLA breached", test: (a) => a.slaBreach },
+  overdue_commitment: { label: "Overdue HubSpot task / reply", test: (a) => a.overdueCommitment },
   contacts_worked: { label: "Contacts worked", test: (a) => a.coverage.worked > 0, contactsOnly: (c) => c.yourTouches > 0 },
   one_contact: { label: "Accounts with 1 contact worked", test: (a) => a.coverage.worked === 1 },
   two_plus: { label: "Accounts with 2+ contacts worked", test: (a) => a.coverage.worked >= 2 },
@@ -636,6 +639,8 @@ export function accountSummary(accounts: ReturnType<typeof accountWorklist>) {
     needFollowUp: n(M.need_follow_up!.test), respond: n((a) => a.bucket === "respond"), active: n(M.active!.test),
     qualified: n(M.qualified!.test), paused: n(M.paused!.test), pausedCompanyWide: n(M.paused_company!.test),
     oneContactWorked: n(M.one_contact!.test), twoPlusWorked: n(M.two_plus!.test),
+    stale14: n(M.stale14!.test), slaBreach: n(M.sla_breach!.test), overdueCommitment: n(M.overdue_commitment!.test),
+    medianDaysSinceLast: (() => { const v = accounts.filter((a) => a.worked && a.daysSinceLast !== null).map((a) => a.daysSinceLast!).sort((x, y) => x - y); return v.length ? v[Math.floor(v.length / 2)]! : null; })(),
     workedButQuiet: n((a) => a.worked && a.bucket === "follow_up"),
     contacts, contactsWorked, contactCoveragePct: contacts ? Math.round((contactsWorked / contacts) * 1000) / 10 : null,
     dispositions: { contact: contactDisp, company: companyDisp },

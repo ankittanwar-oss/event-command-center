@@ -257,7 +257,7 @@ describe("API views", () => {
   test("account execution: every metric's drill-down returns exactly its count, per SDR and All", () => {
     const q = new URLSearchParams("quarter=all");
     const o: any = views.overview(facts, q, "2026-10-30", DEFAULT_RULES);
-    const map: Record<string, string> = { eligible: "accounts", worked: "worked", not_worked: "notWorked", need_follow_up: "needFollowUp", one_contact: "oneContactWorked", two_plus: "twoPlusWorked", active: "active", paused: "paused", paused_company: "pausedCompanyWide", qualified: "qualified" };
+    const map: Record<string, string> = { eligible: "accounts", worked: "worked", not_worked: "notWorked", need_follow_up: "needFollowUp", one_contact: "oneContactWorked", two_plus: "twoPlusWorked", active: "active", paused: "paused", paused_company: "pausedCompanyWide", qualified: "qualified", stale14: "stale14", sla_breach: "slaBreach", overdue_commitment: "overdueCommitment" };
     const rowsToCheck = [...o.accountExec.perSdr.map((r: any) => ({ r, sdr: r.ownerId })), { r: o.accountExec.all, sdr: "" }];
     for (const { r, sdr } of rowsToCheck) {
       for (const [metric, key] of Object.entries(map)) {

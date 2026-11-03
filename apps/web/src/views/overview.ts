@@ -227,7 +227,9 @@ export async function overviewView(route: Route): Promise<HTMLElement> {
     ax("eligible", r, rowName, "Eligible accounts", fmt.n(r.accounts)),
     ax("worked", r, rowName, "Accounts worked", fmt.n(r.worked), `${fmt.pct(r.coveragePct)} coverage`, colour(r.coveragePct, PC.coverageTarget), "Accounts worked / eligible accounts"),
     ax("not_worked", r, rowName, "Not worked", fmt.n(r.notWorked)),
-    ax("need_follow_up", r, rowName, "Need follow-up", fmt.n(r.needFollowUp)),
+    ax("stale14", r, rowName, "Worked, no outreach in 14+ business days", fmt.n(r.stale14), r.medianDaysSinceLast !== null && r.medianDaysSinceLast !== undefined ? `median ${r.medianDaysSinceLast} bd since last` : "", "sc-n", "Informational: worked accounts with no qualifying SDR outreach in 14+ business days (not an SLA)"),
+    ax("sla_breach", r, rowName, "First-touch SLA breached", fmt.n(r.slaBreach), "", r.slaBreach ? "sc-r" : "sc-n", "Not worked and past the Hot 2 / Warm 4 business-day first-touch SLA"),
+    ax("overdue_commitment", r, rowName, "Overdue HubSpot task / reply", fmt.n(r.overdueCommitment), "", r.overdueCommitment ? "sc-r" : "sc-n", "Verified overdue HubSpot task or unanswered prospect reply"),
     ax("contacts_worked", r, rowName, "Contacts worked", fmt.n(r.contactsWorked), `of ${fmt.n(r.contacts)} · ${fmt.pct(r.contactCoveragePct)}`),
     h("td", { class: "sc sc-n" }, h("div", { class: "scb" },
       h("span", { class: "link", onclick: drill("one_contact", r, rowName, "Accounts with 1 contact worked") }, fmt.n(r.oneContactWorked)), " / ",
@@ -240,7 +242,7 @@ export async function overviewView(route: Route): Promise<HTMLElement> {
   const accountExec = AX ? h("div", { class: "card scard" },
     h("div", { class: "hd" }, h("span", { class: "t" }, "Account execution"), h("span", { class: "muted", style: "margin-left:auto" }, "Primary measure · unique HubSpot companies · worked = 1+ qualifying SDR outreach to any eligible event contact")),
     h("div", { class: "tbl-wrap" }, h("table", { class: "sctable" },
-      h("thead", null, h("tr", null, ["SDR", "Eligible accounts", "Accounts worked", "Not worked", "Need follow-up", "Contacts worked", "Accounts 1 / 2+ contacts", "In conversation", "Paused / closed", "Qualified"].map((x, i) => h("th", { class: i ? "n" : "" }, x)))),
+      h("thead", null, h("tr", null, ["SDR", "Eligible accounts", "Accounts worked", "Not worked", "No outreach 14+ bd", "First-touch SLA breached", "Overdue tasks / replies", "Contacts worked", "Accounts 1 / 2+ contacts", "In conversation", "Paused / closed", "Qualified"].map((x, i) => h("th", { class: i ? "n" : "" }, x)))),
       h("tbody", null, AX.perSdr.map((r: any) => axRow(r.name, r, r.name)), AX.perSdr.length > 1 ? axRow(h("b", null, "All"), AX.all, "All SDRs") : null))),
     h("details", { class: "dmore", style: "padding: 0 14px 10px" }, h("summary", null, "Why worked accounts are not being pursued (verified dispositions)"),
       h("div", { class: "grid2" }, h("div", null, h("b", null, "Account-level (company-wide)"), dispList(AX.all.dispositions.company)), h("div", null, h("b", null, "Contact-level"), dispList(AX.all.dispositions.contact)))),
@@ -249,7 +251,7 @@ export async function overviewView(route: Route): Promise<HTMLElement> {
   // ---- A. Outreach timeliness (verified deadlines only)
   const trow = (name: any, c: any, patch: Partial<FilterState>, label: string) => h("tr", null, h("td", null, name),
     cell(fmt.n(K(c, "t_ft_breach")), "", "cmo_t_ft_breach", patch, `${label}: first-touch SLA breaches`, K(c, "t_ft_breach") ? "sc-r" : "sc-n"),
-    cell(fmt.n(K(c, "t_fu_overdue")), K(c, "t_fu_overdue") ? `task ${K(c, "t_fu_overdue_task")} · cadence ${K(c, "t_fu_overdue_cadence")} · reply ${K(c, "t_fu_overdue_reply")}` : "", "cmo_t_fu_overdue", patch, `${label}: verified follow-up overdue`, K(c, "t_fu_overdue") ? "sc-r" : "sc-n"),
+    cell(fmt.n(K(c, "t_fu_overdue")), K(c, "t_fu_overdue") ? `task ${K(c, "t_fu_overdue_task")} · reply ${K(c, "t_fu_overdue_reply")}` : "", "cmo_t_fu_overdue", patch, `${label}: verified follow-up overdue`, K(c, "t_fu_overdue") ? "sc-r" : "sc-n"),
     cell(fmt.n(K(c, "t_due_today")), "", "cmo_t_due_today", patch, `${label}: due today`),
     cell(fmt.n(K(c, "t_upcoming")), "", "cmo_t_upcoming", patch, `${label}: upcoming`));
   const timeliness = h("div", { class: "card scard" },
@@ -257,8 +259,8 @@ export async function overviewView(route: Route): Promise<HTMLElement> {
     h("div", { class: "tbl-wrap" }, h("table", { class: "sctable" },
       h("thead", null, h("tr", null, h("th", null, "SDR"),
         h("th", { class: "n", title: "No touch and past the first-touch SLA (business days)" }, "First-touch SLA breaches"),
-        h("th", { class: "n", title: "Overdue HubSpot task, unanswered reply, or no touch beyond the stall limit" }, "Verified follow-up overdue"),
-        h("th", { class: "n", title: "First touch due today, or follow-up due now (task/reply due today, or below the expected-touch curve)" }, "Due today"),
+        h("th", { class: "n", title: "Overdue HubSpot task, unanswered reply, or no touch beyond the stall limit" }, "Overdue tasks / replies"),
+        h("th", { class: "n", title: "First touch due today, or a HubSpot task / reply due today" }, "Due today"),
         h("th", { class: "n" }, "Upcoming"))),
       h("tbody", null, scRows.map(({ r, c }: any) => trow(r.name, c, { sdr: r.ownerId, region: "" }, r.name)), scRows.length > 1 ? trow(h("b", null, "All leads in view"), all, {}, "All") : null))));
 

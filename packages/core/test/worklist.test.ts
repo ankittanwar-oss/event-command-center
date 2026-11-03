@@ -29,15 +29,11 @@ describe("daily worklist", () => {
     const w = one(ds);
     assert.equal(w.section, "today"); assert.equal(w.action, "Complete HubSpot task");
   });
-  test("fewer than 6-7 touches alone is not overdue: follow-up due from the cadence rule", () => {
+  test("after first outreach there is no follow-up deadline: informational only, never overdue", () => {
     const w = one(dataset({ acts: [act({ ts: "2026-10-27" })] }));
-    assert.equal(w.action, "Follow up"); assert.notEqual(w.section, "overdue");
-    // below the expected-touch curve for its age -> due (amber), matching the existing insufficientFollowUp rule
-    const f = computeLeadFacts(dataset({ acts: [act({ ts: "2026-10-27" })] }), R, T)[0]!;
-    assert.equal(w.section === "today", f.insufficientFollowUp);
-    // a new lead with one touch and nothing due yet is "not yet due", never overdue
-    const n = one(dataset({ events: [event({ date: "2026-10-28" })], acts: [act({ ts: "2026-10-28" })] }));
-    assert.equal(n.section, "upcoming");
+    assert.equal(w.action, "Follow-up opportunity"); assert.equal(w.due, null); assert.equal(w.overdueBusinessDays, null);
+    const old = one(dataset({ acts: [act({ ts: "2026-10-02" })] }));
+    assert.notEqual(old.section, "overdue"); assert.equal(old.due, null);
   });
   test("an open deal WITHOUT a Became Qualified to Buy Date never takes the lead out of SDR follow-up", () => {
     const acctDeal = computeLeadFacts(dataset({ acts: [act({ ts: "2026-10-02" })], deals: [deal({ contactIds: [], sqlDate: null, stageLabel: "Discovery" })] }), R, T)[0]!;
@@ -46,11 +42,11 @@ describe("daily worklist", () => {
     const contactDeal = computeLeadFacts(dataset({ acts: [act({ ts: "2026-10-02" })], deals: [deal()] }), R, T)[0]!;
     assert.equal(riskOf(contactDeal, R)?.level, "healthy");
   });
-  test("SLA, depth and follow-up are independent: one on-time touch can still have follow-up due", () => {
+  test("SLA, depth and follow-up are independent: one on-time touch has no follow-up deadline", () => {
     const f = computeLeadFacts(dataset({ acts: [act({ ts: "2026-10-02" })] }), R, T)[0]!;
     const d = leadDimensions(f, T, R);
     assert.equal(d.sla, "First-touch SLA met"); assert.equal(d.depth, "1");
-    assert.match(d.followUp!, /Follow-up (due|overdue)/); assert.match(d.cadence!, /incomplete/);
+    assert.match(d.followUp!, /no deadline/); assert.match(d.cadence!, /recommended/);
   });
   test("reassigned account: previous SDR touches kept as context, not credited; SLA runs from allocation", () => {
     const ds = dataset({ companies: [company({ allocationDate: "2026-10-26" })], acts: [act({ ts: "2026-10-05", ownerId: DISHA })] });
@@ -77,12 +73,11 @@ describe("daily worklist", () => {
   });
 });
 
-test("SLA start date affects only the first-touch SLA, not follow-up cadence", () => {
+test("SLA start date affects only the first-touch SLA; worked leads carry no follow-up risk", () => {
   const r = rules({ slaStartDate: "2026-10-30" });
   const f = computeLeadFacts(dataset({ acts: [act({ ts: "2026-10-26" })] }), r, T)[0]!;
   assert.equal(f.firstTouchSlaMet, null);
-  assert.equal(f.insufficientFollowUp, true);
-  assert.equal(riskOf(f, r)?.level, "at_risk");
+  assert.equal(riskOf(f, r)?.level, "neutral");
 });
 
 describe("14-business-day inactivity", () => {
@@ -96,10 +91,10 @@ describe("14-business-day inactivity", () => {
     const opp = computeLeadFacts(dataset({ acts: [act({ ts: "2026-10-05" })], deals: [deal()] }), R, T)[0]!;
     assert.equal(inactivity(opp, T, R).kind, "ae_or_pause");
   });
-  test("overdue source is named: cadence vs task", async () => {
+  test("overdue source is named; only tasks, replies and the first-touch SLA can be overdue", async () => {
     const { overdueSource } = await import("../src/index.js");
     const c = leadWork(computeLeadFacts(dataset({ acts: [act({ ts: "2026-10-05" })] }), R, T)[0]!, T, R);
-    assert.match(overdueSource(c)!.label, /^Follow-up cadence overdue by \d+ business day/);
+    assert.equal(overdueSource(c), null);
     const ds = dataset({ acts: [act({ ts: "2026-10-26" })], tasks: [{ id: "t", dueDate: "2026-10-26T00:00:00Z", status: "NOT_STARTED", taskType: "CALL", ownerId: BOBBI, subject: "Call", contactIds: ["c1"] }] });
     assert.equal(overdueSource(leadWork(computeLeadFacts(ds, R, T)[0]!, T, R))!.label, "HubSpot task overdue by 4 business days");
   });
@@ -265,4 +260,48 @@ test("Zest AI / Michelle Chen pattern: pre-allocation touches are 'since the eve
   assert.equal(a.group, "paused"); assert.equal(a.overdueBusinessDays, null);
   const acc = accountWorklist(contactWorklist([f], NOV, R, disp).items)[0]!;
   assert.equal(acc.worked, true); assert.equal(acc.bucket, "paused"); assert.equal(acc.companyDisposition, null);
+});
+
+describe("cadence deadlines restart from the latest qualifying touch", () => {
+  const NOV = "2026-11-03";
+  test("Ashley Spencer / MediaKind: 26 Oct touch kept; no invented follow-up deadline; days since last contact shown", async () => {
+    const { contactAction } = await import("../src/index.js");
+    const ds = dataset({ events: [event({ date: "2026-08-25", category: "webinar" })], companies: [company({ allocationDate: "2026-08-31", temperatureRaw: "Warm" })],
+      acts: [act({ ts: "2026-10-26T21:45:58Z" })] });
+    const f = computeLeadFacts(ds, R, NOV)[0]!;
+    assert.equal(f.currentSdrTouches, 1);
+    const w = leadWork(f, NOV, R);
+    assert.equal(w.due, null); assert.notEqual(w.section, "overdue"); assert.notEqual(w.section, "today");
+    const a = contactAction(f, NOV, R);
+    assert.equal(a.group, "progress"); assert.match(a.reason, /Last contacted 6 business days ago/);
+    assert.notEqual(a.color, "red"); assert.notEqual(a.color, "amber");
+  });
+  test("long inactivity is a neutral follow-up opportunity; reply / task / disposition still take precedence", async () => {
+    const { contactAction, emptyDispositions } = await import("../src/index.js");
+    const stale = computeLeadFacts(dataset({ events: [event({ date: "2026-08-20" })], acts: [act({ ts: "2026-09-01" }), act({ ts: "2026-09-15" })] }), R, NOV)[0]!;
+    const sa = contactAction(stale, NOV, R);
+    assert.equal(sa.group, "follow_up"); assert.equal(sa.color, "grey"); assert.equal(sa.overdueBusinessDays, null);
+    const reply = computeLeadFacts(dataset({ acts: [act({ ts: "2026-10-20" }), act({ ts: "2026-10-30", kind: "INCOMING_EMAIL", direction: "INCOMING_EMAIL", title: "Re: hi" })] }), R, NOV)[0]!;
+    assert.equal(contactAction(reply, NOV, R).group, "respond");
+    const task = computeLeadFacts(dataset({ acts: [act({ ts: "2026-11-02" })], tasks: [{ id: "t", dueDate: "2026-10-28T09:00:00Z", status: "NOT_STARTED", taskType: "CALL", ownerId: BOBBI, subject: "Call back as promised", contactIds: ["c1"] }] }), R, NOV)[0]!;
+    const ta = contactAction(task, NOV, R);
+    assert.equal(ta.group, "respond"); assert.equal(ta.color, "red");
+    const disp = emptyDispositions();
+    disp.contact.set("c1", { scope: "contact", id: "c1", code: "revisit_later", reason: "Asked to reconnect in Q1", evidence: "call", revisitDate: "2027-01-15", confirmedBy: "Bobbi", confirmedAt: null, source: "dashboard" });
+    assert.equal(contactAction(stale, NOV, R, disp).group, "paused");
+  });
+});
+
+test("first-touch SLA with the policy defaults: Hot 2, Warm 4 business days, effective 1 Nov 2026", async () => {
+  const { DEFAULT_RULES, mergeRules } = await import("../src/index.js");
+  const P = mergeRules(DEFAULT_RULES, { minEventDate: null });
+  assert.equal(P.cadence.Hot.firstTouchBusinessDays, 2); assert.equal(P.cadence.Warm.firstTouchBusinessDays, 4);
+  assert.equal(P.slaStartDate, "2026-11-01");
+  const mk = (temp: string) => computeLeadFacts(dataset({ events: [event({ date: "2026-11-02" })], companies: [company({ allocationDate: "2026-11-02", temperatureRaw: temp })] }), P, "2026-11-09")[0]!;
+  assert.equal(leadWork(mk("Hot"), "2026-11-09", P).due, "2026-11-04");   // Mon 2 Nov + 2 bd
+  assert.equal(leadWork(mk("Warm"), "2026-11-09", P).due, "2026-11-06");  // + 4 bd
+  assert.equal(leadWork(mk("Hot"), "2026-11-09", P).section, "overdue");
+  // before the effective date: no breach
+  const old = computeLeadFacts(dataset({ events: [event({ date: "2026-10-20" })], companies: [company({ allocationDate: "2026-10-20" })] }), P, "2026-11-09")[0]!;
+  assert.equal(old.firstTouchOverdue, false);
 });

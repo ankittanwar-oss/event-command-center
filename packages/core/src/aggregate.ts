@@ -90,7 +90,7 @@ export const BUCKETS = {
   multi_week: (f: LeadFact) => f.eligible && f.multiWeek,
   sla_met: (f: LeadFact) => f.eligible && f.firstTouchSlaMet === true,
   sla_missed: (f: LeadFact) => f.eligible && f.firstTouchSlaMet === false,
-  attention: (f: LeadFact) => f.eligible && ((f.status === "never_worked" && f.firstTouchOverdue) || f.status === "stalled"),
+  attention: (f: LeadFact) => f.eligible && f.status === "never_worked" && f.firstTouchOverdue, // only the first-touch SLA is mandatory
   no_next_step: (f: LeadFact) => f.eligible && f.touchesSinceEligibility > 0 && !f.hasNextStep && f.status !== "in_play",
   ineligible: (f: LeadFact) => !f.eligible,
   registered: (_f: LeadFact) => true,

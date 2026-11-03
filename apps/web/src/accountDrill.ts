@@ -5,7 +5,7 @@ import { fmt, h, hsLink } from "./ui.js";
 
 // Drill-down behind an Account execution cell. The server applies the exact metric predicate used for the count,
 // with the same filters and SDR attribution; this panel only searches/sorts/filters what it returns.
-const BUCKET_LABEL: Record<string, string> = { respond: "Respond now", first_outreach: "First outreach", follow_up: "Follow up", review: "Needs review",
+const BUCKET_LABEL: Record<string, string> = { respond: "Respond now", first_outreach: "First outreach", follow_up: "Follow-up opportunity", review: "Needs review",
   progress: "Up to date / in progress", paused: "Paused / closed", low: "Lower priority", qualified: "Qualified" };
 const INTENT_RANK: Record<string, number> = { hot: 0, warm: 1, unknown: 2, cold: 3 };
 const URGENCY: Record<string, number> = { respond: 0, follow_up: 1, first_outreach: 2, review: 3, progress: 4, low: 5, paused: 6, qualified: 7 };
@@ -53,7 +53,7 @@ export async function openAccountDrill(filters: FilterState, metric: string, row
       chev,
       h("div", { class: "aname" }, h("b", null, a.companyName ?? "(no company)"), " ", a.companyId ? h("span", { onclick: (e: Event) => e.stopPropagation() }, hsLink("company", a.companyId)) : null,
         h("div", { class: "faint awhy" }, [intentTxt(a.intent), a.intent?.sdrCategory, a.intent?.reason, a.intent?.icp].filter(Boolean).join(" · "))),
-      h("div", { class: "astat" }, h("div", null, `${a.coverage.worked}/${a.coverage.available} contacts worked`), h("div", { class: "faint" }, a.lastSdrTouch ? `Last SDR outreach ${fmt.day(a.lastSdrTouch)}` : "No qualifying SDR outreach")),
+      h("div", { class: "astat" }, h("div", null, `${a.coverage.worked}/${a.coverage.available} contacts worked`), h("div", { class: "faint" }, a.lastSdrTouch ? `Last SDR outreach ${fmt.day(a.lastSdrTouch)}${a.daysSinceLast !== null && a.daysSinceLast !== undefined ? ` · ${a.daysSinceLast} bd ago` : ""}` : "No qualifying SDR outreach")),
       h("div", { class: "aact" }, h("div", { class: "cact" }, a.companyDisposition ? "Paused company-wide" : a.top.action), h("div", { class: "faint" }, BUCKET_LABEL[a.bucket] ?? a.bucket))),
       body);
     return el;
