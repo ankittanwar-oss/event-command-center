@@ -1,5 +1,5 @@
 import { api } from "../api.js";
-import { openLead } from "../drawer.js";
+import { lastContactText, leadTable, openLead } from "../drawer.js";
 import { buildHash, filterParams, type Route } from "../state.js";
 import { fmt, h, hsLink, tempPill } from "../ui.js";
 
@@ -74,6 +74,12 @@ export async function dailyView(route: Route, meta: any): Promise<HTMLElement> {
           i.eventCategory === "sponsored" && i.attendance === "attended" && !i.engagement ? h("span", { class: "faint" }, " (sponsored-event attendance alone is not verified engagement)") : null),
         h("div", null, h("b", null, "SDR: "), i.sdrName ?? "–", i.sdrSource === "pod_ae" ? h("span", { class: "faint" }, " (via AE pod)") : null,
           i.otherSdrTouches ? h("span", { class: "faint" }, ` · ${i.otherSdrTouches} touch(es) by a previous/other SDR, not credited`) : null),
+        h("div", { class: "wcontacts" }, (() => { const box = h("div", { class: "faint" }, "Loading contacts…");
+          api("leads", { ...filterParams(f), bucket: "eligible", search: i.companyName ?? "", limit: "300" }).then((r: any) => {
+            const rows = r.rows.filter((x: any) => (x.companyId ?? `contact:${x.contactId}`) === i.key);
+            box.replaceWith(rows.length ? leadTable(rows, { group: true }) : h("div", { class: "faint" }, "No contact records in the current filters"));
+          }).catch(() => { box.textContent = "Could not load contacts"; });
+          return box; })()),
         h("div", { class: "wlinks" },
           h("span", { class: "link", onclick: () => openLead(i.eventId, i.contactId) }, "Full history (activity, deals, ownership) →"),
           i.contacts > 1 ? h("span", { class: "faint" }, ` · ${i.contacts} contacts on this account${i.otherActions ? `, ${i.otherActions} with their own action` : ""}`) : null));
@@ -83,8 +89,9 @@ export async function dailyView(route: Route, meta: any): Promise<HTMLElement> {
         h("span", { class: "wdot" }),
         h("div", { class: "wco" },
           h("div", { class: "wl1" }, h("b", null, i.companyName ?? "(no company)"), hsLink("company", i.companyId), tempPill(i.temperature),
-            i.openOpp ? h("span", { class: "wtag" }, "open opp") : null, i.engagement ? h("span", { class: "wtag eng" }, i.engagement) : null),
-          h("div", { class: "wl2" }, h("span", { class: "wact" }, i.action), h("span", { class: "wwhy" }, i.why))),
+            i.engagement ? h("span", { class: "wtag eng" }, i.engagement) : null),
+          h("div", { class: "wl2" }, h("span", { class: `abadge ${i.status?.color ?? "grey"}` }, i.status?.label ?? i.action), h("span", { class: "wwhy" }, i.status?.next ?? i.why),
+            (i.status?.secondary ?? []).map((x: string) => h("span", { class: "sbadge" }, x)))),
         h("div", { class: "wct" },
           h("div", null, i.contactName, " ", hsLink("contact", i.contactId)),
           h("div", { class: "faint" }, (i.jobTitle ?? "").slice(0, 40))),
@@ -93,7 +100,7 @@ export async function dailyView(route: Route, meta: any): Promise<HTMLElement> {
           h("div", { class: "faint" }, `${i.currentSdrTouches ?? "–"} touch${i.currentSdrTouches === 1 ? "" : "es"} by SDR`)),
         h("div", { class: "wlast" },
           dueText(i),
-          h("div", { class: "faint" }, i.lastTouchAt ? `last ${fmt.day(i.lastTouchAt)}${i.lastTouchBy ? ` · ${i.lastTouchBy.split(" ")[0]}` : ""}` : "no touch yet"))),
+          h("div", { class: "faint", title: "Last qualifying outbound contact on this contact, by anyone" }, `Last: ${lastContactText(i.lastContact)}`))),
       more);
     return el;
   };

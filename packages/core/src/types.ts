@@ -129,6 +129,7 @@ export interface DealRef {
   lostComment: string | null;
   timing: "before_event" | "after_event" | "unknown";   // pre-existing (MQL, or creation if never MQL, before the event) / new since the event
   via: "contact" | "company" | "duplicate_company"; // this contact / this company only / a same-name company record with the same SDR
+  ownerId?: string | null;            // HubSpot deal owner (optional: absent on older snapshots)
 }
 
 export interface Owner {
@@ -223,6 +224,7 @@ export interface LeadFact {
   currentSdrTouches?: number | null;    // touches by the CURRENT SDR since allocation (previous SDRs not credited)
   otherSdrTouches?: number;             // touches by other roster SDRs (context for reassigned accounts)
   lastTouchOwnerId?: string | null;
+  currentSdrLastTouchAt?: string | null; // last qualifying touch by the CURRENT SDR (any date)
   nextTaskSubject?: string | null;
   nextTaskOwnerId?: string | null;
   slaApplies?: boolean;

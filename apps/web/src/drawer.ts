@@ -113,7 +113,7 @@ export function shortStatus(r: any): { label: string; cls: "crit" | "warnr" | "o
     case "in_play": {
       const kind = /^Open opportunity/.test(r.inPlayReason ?? "") ? "Open opportunity" : /^Meeting/.test(r.inPlayReason ?? "") ? "Meeting" : /^Prospect replied/.test(r.inPlayReason ?? "") ? "Replied" : /Disqualified/.test(r.inPlayReason ?? "") ? "Disqualified" : "In play";
       if (r.touchesSinceEligibility === 0) return { label: `${kind} · no SDR touch`, cls: "neu" };
-      return r.risk === "healthy" ? { label: `In play · ${kind}`, cls: "ok" } : { label: `${kind} on account · follow-up unverified`, cls: "neu" };
+      return r.risk === "healthy" ? { label: `In play · ${kind}`, cls: "ok" } : { label: "Review next action", cls: "neu" };
     }
     case "unverifiable": return { label: "Unverified · company-level activity", cls: "neu" };
     case "recently_lost": return { label: "Recently closed lost", cls: "neu" };
@@ -122,96 +122,133 @@ export function shortStatus(r: any): { label: string; cls: "crit" | "warnr" | "o
 }
 
 const URGENCY: Record<string, number> = { crit: 0, warnr: 1, neu: 2, ok: 3 };
-/** Short next action: first clause only; the full text is in the expanded details. */
-const shortAction = (t: string | null | undefined) => (t ?? "").split(/ – |: |\. /)[0]!.trim();
+const COLOR_RANK: Record<string, number> = { red: 0, amber: 1, green: 2, grey: 3 };
+const COLOR_GROUP: Record<string, string> = { red: "Overdue", amber: "Due now", green: "On track / done", grey: "Info / review" };
 
-/** Compact record list used by every KPI drill-down (replaces the wide table). No horizontal scrolling. */
-export function leadTable(rows: any[]) {
+/** Who last contacted: "30 Oct · Jonathan (SDR)". Name/role only when verified; never invented. */
+export function lastContactText(lc: any): string {
+  if (!lc?.at) return "Not contacted yet";
+  const who = lc.by ? `${lc.by.name ?? "Unknown user"}${lc.by.role ? ` (${lc.by.role})` : ""}` : "owner unknown";
+  return `${fmt.day(lc.at)} · ${who}`;
+}
+const firstName = (n: string | null | undefined) => (n ?? "").split(" ")[0];
+
+/** Merge event-lead records of the same HubSpot contact (action views only; reporting counts are unaffected). */
+export function groupByContact(rows: any[]): any[] {
+  const by = new Map<string, any[]>();
+  for (const r of rows) (by.get(r.contactId) ?? by.set(r.contactId, []).get(r.contactId)!).push(r);
+  return [...by.values()].map((rs) => {
+    if (rs.length === 1) return rs[0];
+    rs.sort((x, y) => (COLOR_RANK[x.action?.color] ?? 9) - (COLOR_RANK[y.action?.color] ?? 9) || (x.dims?.due ?? "9").localeCompare(y.dims?.due ?? "9"));
+    const top = rs[0];
+    // Distinct qualifying activities across the events (the same email is not counted once per event).
+    const ids = new Set(rs.flatMap((r) => r.touchIds ?? []));
+    const last = rs.map((r) => r.lastContact).filter((l) => l?.at).sort((x, y) => y.at.localeCompare(x.at))[0] ?? top.lastContact;
+    return { ...top, grouped: rs, groupedTouches: ids.size, groupedCurrentSdr: Math.max(...rs.map((r) => r.currentSdrTouches ?? 0)), lastContact: last,
+      eventsList: rs.map((r) => ({ id: r.eventId, name: r.eventName, date: r.eventDate, attendance: r.attendance })) };
+  });
+}
+
+/** Short, explicit next action. */
+const shortAction = (t: string | null | undefined) => (t ?? "").split(/ – |\. /)[0]!.trim();
+
+/** Compact record list used by every drill-down. One coloured action badge per record; temperature separate. */
+export function leadTable(rows: any[], opts: { group?: boolean } = {}) {
   const wrap = h("div", { class: "reclist" });
   const search = h("input", { class: "text", type: "search", placeholder: "Search contact, company, event, SDR" }) as HTMLInputElement;
   const sortSel = h("select", { class: "text" },
     [["urgency", "Sort: urgency"], ["touches", "Sort: fewest touches"], ["event", "Sort: event date (newest)"], ["sdr", "Sort: SDR"], ["company", "Sort: company"]].map(([v, l]) => h("option", { value: v }, l))) as HTMLSelectElement;
-  const sdrs = [...new Set(rows.map((r) => r.sdrName ?? sdrNames.get(r.sdrOwnerId) ?? null).filter(Boolean))].sort() as string[];
+  const sdrOf = (r: any) => r.sdrName ?? sdrNames.get(r.sdrOwnerId) ?? null;
+  const sdrs = [...new Set(rows.map(sdrOf).filter(Boolean))].sort() as string[];
   const events = [...new Map(rows.map((r) => [r.eventId, r.eventName])).entries()];
   const sdrSel = h("select", { class: "text" }, h("option", { value: "" }, "All SDRs"), sdrs.map((n) => h("option", { value: n }, n))) as HTMLSelectElement;
   const evSel = h("select", { class: "text" }, h("option", { value: "" }, "All events"), events.map(([id, n]) => h("option", { value: id }, (n ?? "").slice(0, 50)))) as HTMLSelectElement;
-  const statuses = [...new Set(rows.map((r) => shortStatus(r).label))];
-  const stSel = h("select", { class: "text" }, h("option", { value: "" }, "All statuses"), statuses.map((s) => h("option", { value: s }, s))) as HTMLSelectElement;
+  const stSel = h("select", { class: "text" }, h("option", { value: "" }, "All actions"), Object.entries(COLOR_GROUP).map(([k, l]) => h("option", { value: k }, l))) as HTMLSelectElement;
+  const dupes = rows.length - new Set(rows.map((r) => r.contactId)).size;
+  const grp = h("input", { type: "checkbox" }) as HTMLInputElement;
+  grp.checked = opts.group ?? false;
+  const grpLabel = dupes ? h("label", { class: "grpt", title: "Show one entry per HubSpot contact (events listed inside). Counts in reports are not affected." }, grp, ` One row per contact (${dupes} repeat${dupes === 1 ? "" : "s"})`) : null;
   const list = h("div", { class: "recs" });
   const shown = h("span", { class: "muted" });
-
-  const sdrOf = (r: any) => r.sdrName ?? sdrNames.get(r.sdrOwnerId) ?? null;
   const render = () => {
     const q = search.value.trim().toLowerCase();
     let data = rows.filter((r) =>
       (!q || `${r.contactName} ${r.companyName ?? ""} ${r.eventName ?? ""} ${sdrOf(r) ?? ""} ${r.contactEmail ?? ""}`.toLowerCase().includes(q)) &&
-      (!sdrSel.value || sdrOf(r) === sdrSel.value) && (!evSel.value || r.eventId === evSel.value) && (!stSel.value || shortStatus(r).label === stSel.value));
+      (!sdrSel.value || sdrOf(r) === sdrSel.value) && (!evSel.value || r.eventId === evSel.value));
+    if (grp.checked && dupes) data = groupByContact(data);
+    if (stSel.value) data = data.filter((r) => (r.action?.color ?? "grey") === stSel.value);
     const by = sortSel.value;
     data = [...data].sort((a, b) =>
       by === "touches" ? a.touchesSinceEligibility - b.touchesSinceEligibility
       : by === "event" ? (b.eventDate ?? "").localeCompare(a.eventDate ?? "")
       : by === "sdr" ? (sdrOf(a) ?? "~").localeCompare(sdrOf(b) ?? "~")
       : by === "company" ? (a.companyName ?? "~").localeCompare(b.companyName ?? "~")
-      : URGENCY[shortStatus(a).cls]! - URGENCY[shortStatus(b).cls]! || (b.priority ?? 0) - (a.priority ?? 0));
-    shown.textContent = data.length === rows.length ? "" : `${data.length} of ${rows.length} shown`;
+      : (COLOR_RANK[a.action?.color] ?? URGENCY[shortStatus(a).cls]!) - (COLOR_RANK[b.action?.color] ?? URGENCY[shortStatus(b).cls]!) || (a.dims?.due ?? "9").localeCompare(b.dims?.due ?? "9") || (b.priority ?? 0) - (a.priority ?? 0));
+    shown.textContent = `${data.length} ${grp.checked && dupes ? "contacts" : "records"}`;
     list.replaceChildren(...(data.length ? data.slice(0, 1500).map(record) : [h("div", { class: "empty" }, "No records match")]));
   };
-  for (const el of [search]) el.addEventListener("input", render);
-  for (const el of [sortSel, sdrSel, evSel, stSel]) el.addEventListener("change", render);
+  search.addEventListener("input", render);
+  for (const el of [sortSel, sdrSel, evSel, stSel, grp]) el.addEventListener("change", render);
 
   function record(r: any): HTMLElement {
-    const st = shortStatus(r);
+    const act = r.action ?? { label: shortStatus(r).label, color: ({ crit: "red", warnr: "amber", ok: "green", neu: "grey" } as any)[shortStatus(r).cls], next: r.nextAction, secondary: [] };
     const sdr = sdrOf(r) ?? (r.sdrOwnerRaw ? `Not on roster (${r.sdrOwnerRaw})` : "No SDR");
+    const touches = r.grouped ? r.groupedTouches : r.touchesSinceEligibility;
     const details = h("div", { class: "recd" });
     let loaded = false;
     const toggle = h("button", { class: "recx", "aria-expanded": "false", onclick: () => {
       const open = el.classList.toggle("open");
       toggle.setAttribute("aria-expanded", String(open));
-      toggle.textContent = open ? "Hide details" : "Details";
+      toggle.textContent = open ? "Hide" : "Details";
       if (open && !loaded) { loaded = true; details.replaceChildren(detailBody(r)); }
     } }, "Details");
-    const el = h("div", { class: `rec ${st.cls}` },
+    const sdrLast = r.lastContact?.sdrAt && r.lastContact.sdrAt.slice(0, 10) !== (r.lastContact.at ?? "").slice(0, 10) ? ` · ${firstName(sdr)} last ${fmt.day(r.lastContact.sdrAt)}` : "";
+    const el = h("div", { class: `rec a-${act.color}` },
       h("div", { class: "rl1" },
         h("span", { class: "rname" }, h("span", { class: "link", onclick: () => openLead(r.eventId, r.contactId), title: "Open lead audit" }, r.contactName), hsLink("contact", r.contactId)),
         h("span", { class: "rco" }, r.companyName ?? "No company", hsLink("company", r.companyId)),
         h("span", { class: "rsdr muted" }, sdr),
-        h("span", { class: `rst ${st.cls}`, title: r.statusReason ?? "" }, st.label)),
+        h("span", { class: `abadge ${act.color}`, title: act.next ?? "" }, act.label)),
       h("div", { class: "rl2 muted" },
-        h("span", { class: "rev", title: r.eventName }, r.eventName ?? "–"), h("span", null, fmt.day(r.eventDate)),
+        r.grouped ? h("span", { class: "rev", title: r.eventsList.map((e: any) => `${e.name} (${fmt.day(e.date)})`).join("\n") }, `${r.eventsList.length} events`)
+          : [h("span", { class: "rev", title: r.eventName }, r.eventName ?? "–"), h("span", null, fmt.day(r.eventDate))],
         tempPill(r.temperature, r.temperatureRaw),
-        h("span", null, r.attendance === "attended" ? "Attended" : r.attendance === "no_show" ? "Did not attend" : "Attendance unknown"),
-        h("span", { class: `rtouch ${r.touchesSinceEligibility ? "" : "zero"}` }, `${r.touchesSinceEligibility} SDR touch${r.touchesSinceEligibility === 1 ? "" : "es"}`),
-        r.lastTouchAt ? h("span", null, `last ${fmt.day(r.lastTouchAt)}`) : null),
-      r.dims ? h("div", { class: "rdims muted" }, [r.dims.sla, r.dims.cadence, r.dims.followUp && r.status === "in_play" ? r.dims.followUp : null].filter(Boolean).join(" · ")) : null,
-      h("div", { class: "rl3" }, h("span", { class: "ract", title: r.nextAction ?? "" }, r.eligible ? shortAction(r.nextAction) : `Excluded: ${r.ineligibleReason ?? ""}`), toggle),
+        r.grouped ? null : h("span", null, r.attendance === "attended" ? "Attended" : r.attendance === "no_show" ? "No-show" : "Attendance unknown"),
+        h("span", { class: `rtouch ${touches ? "" : "zero"}` }, `${touches} SDR touch${touches === 1 ? "" : "es"}`),
+        h("span", null, `Last contacted: ${lastContactText(r.lastContact)}${sdrLast}`)),
+      h("div", { class: "rl3" },
+        h("span", { class: "ract" }, r.eligible ? shortAction(act.next) : act.next),
+        (act.secondary ?? []).map((x: string) => h("span", { class: "sbadge" }, x)),
+        toggle),
       details);
     return el;
   }
-  wrap.append(h("div", { class: "rectools" }, search, stSel, sdrSel, evSel, sortSel, shown), list);
+  wrap.append(h("div", { class: "rectools" }, search, stSel, sdrSel, evSel, sortSel, grpLabel, shown), list);
   render();
   return wrap;
 }
 
-/** Expanded record: the full CRM context that was previously in the wide table, plus deals. */
+/** Expanded record: action source, contact history, tasks, deals and every event association. */
 function detailBody(r: any): HTMLElement {
   const kv = (k: string, v: any) => (v === null || v === undefined || v === "" ? null : [h("div", { class: "k" }, k), h("div", null, v)]);
+  const src = ({ task: "HubSpot task due date", reply: "Prospect reply (respond within 1 business day)", sla: "First-touch SLA", cadence: "Follow-up cadence rule", engagement: "Verified engagement on this contact", none: "No reliable deadline" } as Record<string, string>)[r.action?.source ?? "none"];
+  const lc = r.lastContact;
+  const evs = r.grouped ? r.grouped : [r];
   return h("div", null,
     h("div", { class: "kv tight" },
-      kv("Status", [statusPill(r.status, r.statusLabel ?? r.status, r.risk), " ", r.statusReason ?? ""]),
-      kv("Deadline", r.dims ? [r.dims.overdue ? h("b", { class: "crit-t" }, r.dims.overdue) : r.dims.deadlineLabel, r.dims.due && !r.dims.overdue ? ` · due ${fmt.day(r.dims.due)} (${({ task: "HubSpot task", sla: "first-touch SLA", cadence: "follow-up cadence", reply: "prospect reply" } as Record<string, string>)[r.dims.dueSource] ?? "–"})` : ""] : null),
-      kv("Last SDR touch", r.dims && r.dims.inactiveDays !== null ? `${r.dims.inactiveDays} business days ${r.touchesSinceEligibility ? "since the last qualifying touch" : "since eligibility, never touched"}${r.dims.stale ? ` · no touch in ${r.dims.inactiveDays >= 14 ? "14+" : r.dims.inactiveDays} business days${r.dims.staleKind === "ae_or_pause" ? " (AE-led / paused)" : r.dims.staleKind === "review" ? " (needs review)" : " (SDR action)"}` : ""}` : null),
-      kv("In play because", r.inPlayReason),
-      kv("Next action", r.nextAction),
-      kv("Touches", `${r.touchesSinceEligibility} since eligibility · ${r.touchesPostEvent} since event · ${r.touchesSinceAllocation ?? "–"} since allocation`),
-      kv("First / last touch", `${fmt.day(r.firstTouchAt)} / ${fmt.day(r.lastTouchAt)}`),
-      kv("Days to first touch", r.businessDaysToFirstTouch !== null ? `${r.businessDaysToFirstTouch} business days${r.firstTouchSlaMet === false ? " (SLA missed)" : r.firstTouchSlaMet ? " (SLA met)" : ""}` : r.firstTouchOverdue ? "Not touched, SLA missed" : "Not touched yet"),
-      kv("Consistency", `${r.distinctTouchDays} day(s) · ${r.distinctTouchWeeks} week(s) · longest gap ${r.maxGapDays ?? "–"} d`),
-      kv("Next task", r.nextTaskDue ? fmt.day(r.nextTaskDue) : "None scheduled"),
-      kv("SDR assignment", r.sdrSource === "pod_ae" ? "Pod SDR via the company's AE owner (company SDR Owner is not a pod SDR)" : r.sdrSource === "company" ? "Company SDR Owner" : null),
+      kv("Action", r.action ? [h("span", { class: `abadge ${r.action.color}` }, r.action.label), " ", r.action.next] : r.nextAction),
+      kv("Why / source", src),
+      kv("Last contacted", lc?.at ? `${lastContactText(lc)}${lc.sdrAt ? ` · current SDR's last qualifying touch ${fmt.day(lc.sdrAt)}` : " · no qualifying touch by the current SDR"}` : "No outbound contact logged"),
+      kv("SDR touches", r.grouped ? `${r.groupedTouches} distinct qualifying touches across ${evs.length} events · ${r.groupedCurrentSdr} by the current SDR since allocation` : `${r.touchesSinceEligibility} since eligibility · ${r.currentSdrTouches ?? "–"} by the current SDR since allocation${r.otherSdrTouches ? ` · ${r.otherSdrTouches} by another SDR (not credited)` : ""}`),
+      kv("HubSpot task", r.nextTaskDue ? `${r.nextTaskSubject ?? "Open task"} · due ${fmt.day(r.nextTaskDue)}${r.nextTaskOwnerId ? ` · ${sdrNames.get(r.nextTaskOwnerId) ?? "assigned to another user"}` : ""}` : "None open"),
+      kv("First-touch SLA", r.dims?.sla ?? null),
+      kv("Cadence", r.dims?.cadence ?? null),
+      kv(evs.length > 1 ? "Events" : "Event", h("div", null, evs.map((e: any) => h("div", null, `${e.eventName} · ${fmt.day(e.eventDate)} · ${e.attendance === "attended" ? "attended" : e.attendance === "no_show" ? "no-show" : "attendance unknown"} · ${e.action?.label ?? ""}`)))),
+      kv("SDR assignment", r.sdrSource === "pod_ae" ? "Pod SDR via the company's AE owner" : r.sdrSource === "company" ? "Company SDR Owner" : null),
       kv("Eligibility", r.eligible ? `Eligible since ${fmt.day(r.eligibilityDate)} (allocated ${fmt.day(r.allocationDate)})` : `Not eligible: ${r.ineligibleReason}`),
       kv("ICP / title", [r.icpTier ?? "–", r.jobTitle ? ` · ${r.jobTitle}` : ""]),
       kv("Email", r.contactEmail)),
-    r.deals?.length ? h("div", { style: "margin-top:6px" }, dealTable(r.deals)) : null,
+    r.deals?.length ? h("div", { style: "margin-top:6px" }, h("div", { class: "muted", style: "font-size:12px;margin-bottom:4px" }, "Deals: an open deal on the company does not mean this contact is involved or that SDR follow-up is done."), dealTable(r.deals)) : null,
     h("button", { class: "btn", style: "margin-top:8px", onclick: () => openLead(r.eventId, r.contactId) }, "Full activity audit →"));
 }
 

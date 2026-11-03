@@ -8,7 +8,7 @@ import { getPool } from "../db/pool.js";
 import { getSetting, setSetting } from "../db/repo.js";
 import { loadRules, validateRules } from "../rules.js";
 import { recomputeFacts, runSync } from "../sync/sync.js";
-import { getSnapshot, invalidateSnapshot } from "./cache.js";
+import { getSnapshot, invalidateSnapshot, ownerNames } from "./cache.js";
 import { checkAppAuth, HttpError, readJson, requireAdmin, SECURITY_HEADERS, send } from "./http.js";
 import * as v from "./views.js";
 
@@ -116,10 +116,10 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL) {
           else if (fact.eligibilityDate && a.timestamp.slice(0, 10) < fact.eligibilityDate) why = "Before eligibility date";
           else why = "Duplicate";
         }
-        return { ...a, hsId: row.hs_id, via: row.via, ownerName: rosterById.get(a.ownerId ?? "")?.name ?? row.owner_id, counted: counted.has(a.id), why };
+        return { ...a, hsId: row.hs_id, via: row.via, ownerName: rosterById.get(a.ownerId ?? "")?.name ?? ownerNames.get(a.ownerId ?? "") ?? row.owner_id, counted: counted.has(a.id), why };
       });
       const risk = riskOf(fact, rules);
-      return send(res, 200, { lead: fact, nextAction: nextAction(fact, rules), risk: risk?.level ?? null, riskLabel: risk ? RISK_LABEL[risk.level] : null, riskReason: risk?.reason ?? null, activities });
+      return send(res, 200, { lead: fact, enriched: v.withRisk(fact, rules, t), nextAction: nextAction(fact, rules), risk: risk?.level ?? null, riskLabel: risk ? RISK_LABEL[risk.level] : null, riskReason: risk?.reason ?? null, activities });
     }
   }
 

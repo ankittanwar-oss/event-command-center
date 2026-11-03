@@ -1,6 +1,6 @@
 import {
   accountQueue, applyFilters, BUCKETS, categoryBreakdown, CATEGORY_LABEL, dataQuality, eventSummaries, fiscalQuarterOf, inBucket, nextAction,
-  normalizeFilters, parseQuarterKey, worklist, leadDimensions, ACTION_HEALTH_LABEL, outreachTimeliness, inactivity, overdueSource, deadlineState, leadWork, contactLevelInPlay, DEFAULT_RULES, dealOrder, type DealRef, depthStats, sdrDepth, accountDepth, WINDOW_LABEL, BANDS, type TouchWindow, findings, narrative, RISK_LABEL, riskCounts, riskOf, sdrRisk, previousQuarter, qoq, quarterMetrics, regionBreakdown, rosterById, SDR_ROSTER, sdrTable, STATUS_LABEL, temperatureSummary,
+  normalizeFilters, parseQuarterKey, worklist, leadDimensions, ACTION_HEALTH_LABEL, outreachTimeliness, inactivity, overdueSource, deadlineState, leadWork, contactLevelInPlay, actionStatus, DEFAULT_RULES, dealOrder, type DealRef, depthStats, sdrDepth, accountDepth, WINDOW_LABEL, BANDS, type TouchWindow, findings, narrative, RISK_LABEL, riskCounts, riskOf, sdrRisk, previousQuarter, qoq, quarterMetrics, regionBreakdown, rosterById, SDR_ROSTER, sdrTable, STATUS_LABEL, temperatureSummary,
   type EventCategory, type Filters, type LeadFact, type NormalizedFilters, type Region, type Rules,
 } from "@ecc/core";
 
@@ -36,18 +36,33 @@ export function filtered(facts: LeadFact[], q: URLSearchParams, today: string, o
   return { nf, rows: applyFilters(facts, nf) };
 }
 
+import { ownerNames } from "./owners.js";
+/** Owner name + role, only when verifiable: roster -> SDR, pod AE map -> AE, otherwise the HubSpot name without a role. */
+export function ownerLabel(id: string | null | undefined, rules: Rules): { id: string; name: string | null; role: "SDR" | "AE" | null } | null {
+  if (!id) return null;
+  const sdr = rosterById.get(id);
+  if (sdr) return { id, name: sdr.name, role: "SDR" };
+  const role = Object.prototype.hasOwnProperty.call(rules.podAeToSdr ?? {}, id) ? "AE" : null;
+  return { id, name: ownerNames.get(id) ?? null, role };
+}
+
 /** Adds the presentation-only risk level to a lead record. */
-function withRisk(f: LeadFact, rules: Rules, today?: string) {
+export function withRisk(f: LeadFact, rules: Rules, today?: string) {
   const r = riskOf(f, rules);
   const dm = today && f.eligible ? leadDimensions(f, today, rules) : null;
   const ia = dm ? inactivity(f, today!, rules) : null;
   const ds = dm ? deadlineState(f, today!, rules) : null;
+  const action = today ? actionStatus(f, today, rules) : null;
+  // Last qualifying outbound contact by anyone (SDR, AE, other), and the current SDR's own last qualifying touch.
+  const lastAny = f.lastOutboundAt !== undefined ? { at: f.lastOutboundAt ?? null, owner: ownerLabel(f.lastOutboundOwnerId, rules) } : { at: f.lastTouchAt, owner: ownerLabel(f.lastTouchOwnerId ?? null, rules) };
+  const lastContact = { at: lastAny.at, by: lastAny.owner, sdrAt: f.currentSdrLastTouchAt ?? null, sdr: ownerLabel(f.sdrOwnerId, rules) };
+  const dealsOut = (f.deals ?? []).map((d) => ({ ...d, owner: ownerLabel(d.ownerId ?? null, rules) }));
   const dims = dm ? { sla: dm.sla, depth: dm.depth, followUp: dm.followUp, cadence: dm.cadence, health: dm.health, healthLabel: ACTION_HEALTH_LABEL[dm.health],
     overdue: overdueSource(dm.work)?.label ?? null, dueSource: dm.work.dueSource, due: dm.work.due,
     inactiveDays: ia?.businessDays ?? null, inactiveSince: ia?.since ?? null, stale: ia?.stale ?? false, staleKind: ia?.kind ?? null,
     deadline: ds, deadlineLabel: ds ? ({ verified: "Verified deadline", not_yet_due: "Not yet due", no_deadline: "No verified deadline", commercial: "Active commercial engagement", paused: "Paused / not actionable", missing_data: "Missing data" } as Record<string, string>)[ds] : null } : null;
   const label = f.status === "in_play" && f.touchesSinceEligibility === 0 ? "In play – no SDR touch" : STATUS_LABEL[f.status];
-  return { ...f, dims, nextAction: nextAction(f, rules), statusLabel: label, risk: r?.level ?? null, riskLabel: r ? RISK_LABEL[r.level] : null, riskReason: r?.reason ?? null };
+  return { ...f, deals: dealsOut, action, lastContact, dims, nextAction: nextAction(f, rules), statusLabel: label, risk: r?.level ?? null, riskLabel: r ? RISK_LABEL[r.level] : null, riskReason: r?.reason ?? null };
 }
 
 /** Bucket predicate including the risk buckets (risk_critical, risk_at_risk, risk_healthy, risk_neutral). */
@@ -405,7 +420,7 @@ export function daily(facts: LeadFact[], q: URLSearchParams, today: string, rule
       nextTask: leads.map((l) => l.nextTaskDue).filter(Boolean).sort()[0] ?? null,
       dealStatus: accountDeals(leads).filter((d) => d.via !== "duplicate_company")[0]?.status ?? "none",
       group, nextAction: a.nextAction, color, colorLabel,
-      contacts: leads.map((l) => withRisk(l, rules)),
+      contacts: leads.map((l) => withRisk(l, rules, today)),
     };
   });
   const urg = Object.fromEntries(DAILY_GROUPS.map((g, i) => [g.key, i]));
@@ -430,5 +445,6 @@ export function daily(facts: LeadFact[], q: URLSearchParams, today: string, rule
   // Action worklist (primary SDR view). The timeliness summary above stays in the response for reporting.
   const work = worklist(rows, today, rules);
   return { filters: nf, groups: DAILY_GROUPS, summary: summarise(accts), bySdr, accounts: accts.slice(0, 1500), total: accts.length,
-    today, work: { sections: work.sections, counts: work.counts, items: work.items.slice(0, 2000), total: work.items.length } };
+    today, work: { sections: work.sections, counts: work.counts, total: work.items.length,
+      items: work.items.slice(0, 2000).map((i) => ({ ...i, lastContact: { at: i.lastOutboundAt, by: ownerLabel(i.lastOutboundOwnerId, rules), sdrAt: i.currentSdrLastTouchAt, sdr: ownerLabel(i.sdrOwnerId, rules) } })) } };
 }

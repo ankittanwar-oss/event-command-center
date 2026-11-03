@@ -238,6 +238,8 @@ export function computeLeadFact(
   const currentSdrTouches = sdr && sdrFrom ? touches.filter((t) => t.ownerId === sdr && day(t) >= sdrFrom).length : null;
   const otherSdrTouches = touches.filter((t) => t.ownerId !== sdr).length;
   const lastTouchOwnerId = sinceElig.length ? sinceElig[sinceElig.length - 1]!.ownerId : null;
+  const mine = sdr ? touches.filter((t) => t.ownerId === sdr) : [];
+  const currentSdrLastTouchAt = mine.length ? mine[mine.length - 1]!.timestamp : null;
 
   // ---- status
   let status: FollowUpStatus;
@@ -294,6 +296,7 @@ export function computeLeadFact(
       lostComment: status === "lost" ? d.lostComment ?? null : null,
       timing: !ev.date || (!d.mqlDate && !d.createdAt) ? "unknown" : historical(d) ? "before_event" : "after_event",
       via: contactDealIds.has(d.id) ? "contact" : ownDealIds.has(d.id) ? "company" : "duplicate_company",
+      ownerId: d.ownerId ?? null,
     };
   });
   dealRefs.sort(dealOrder);
@@ -315,7 +318,7 @@ export function computeLeadFact(
     daysSinceLastTouch: lastTouchAt ? daysBetween(toDate(lastTouchAt)!, today) : null,
     businessDaysToFirstTouch: bizToFirst, businessDaysSinceEligibility: bizSinceElig,
     lastReplyAt, lastOutboundAt: lastOutbound?.timestamp ?? null, lastOutboundOwnerId: lastOutbound?.ownerId ?? null, lastMeetingAt,
-    currentSdrTouches, otherSdrTouches, lastTouchOwnerId,
+    currentSdrTouches, otherSdrTouches, lastTouchOwnerId, currentSdrLastTouchAt,
     nextTaskSubject: nextTask?.subject ?? null, nextTaskOwnerId: nextTask?.ownerId ?? null, slaApplies: !noSla,
     firstTouchSlaMet: noSla ? null : slaMet, firstTouchOverdue: noSla ? false : overdue, expectedTouches: expected,
     insufficientFollowUp: insufficient, multiWeek: weeks.size >= rules.multiWeekMinWeeks,

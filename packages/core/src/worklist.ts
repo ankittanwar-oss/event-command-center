@@ -216,6 +216,9 @@ export function worklist(rows: LeadFact[], today: string, rules: Rules) {
     const lastTouch = leads.filter((l) => l.lastTouchAt).sort((a, b) => b.lastTouchAt!.localeCompare(a.lastTouchAt!))[0] ?? null;
     return {
       key, companyId: key.startsWith("contact:") ? null : key, companyName: f.companyName ?? f.contactName,
+      status: actionStatus(f, today, rules, top),
+      lastOutboundAt: f.lastOutboundAt !== undefined ? f.lastOutboundAt ?? null : f.lastTouchAt, lastOutboundOwnerId: f.lastOutboundAt !== undefined ? f.lastOutboundOwnerId ?? null : f.lastTouchOwnerId ?? null,
+      currentSdrLastTouchAt: f.currentSdrLastTouchAt ?? null,
       section: top.section, action: top.action, why: top.why, due: top.due, dueSource: top.dueSource, overdueBusinessDays: top.overdueBusinessDays,
       contactId: f.contactId, contactName: f.contactName, jobTitle: f.jobTitle, eventId: f.eventId, eventName: f.eventName, eventDate: f.eventDate, eventCategory: f.eventCategory,
       sdrOwnerId: f.sdrOwnerId, sdrName: f.sdrOwnerId ? rosterById.get(f.sdrOwnerId)?.name ?? null : null, sdrSource: f.sdrSource ?? null,
@@ -303,4 +306,50 @@ export function deadlineState(f: LeadFact, today: string, rules: Rules): Deadlin
   if (f.status === "recently_lost" || f.inPlayReason === "Disqualified" || w.action === "Review next step") return "paused";
   if (f.status === "unverifiable" || !f.eligibilityDate || (f.touchesSinceEligibility > 0 && !f.lastTouchAt)) return "missing_data";
   return "no_deadline";
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// One action status per record for drill-downs and the daily view. Colour = action urgency only:
+//   red   verified overdue action        amber  due today / follow-up due now
+//   green verified on-track or completed grey   informational, commercial context, or needs review
+// A verified HubSpot task or reply always wins over an account-level deal (leadWork already orders them that way).
+// ---------------------------------------------------------------------------------------------------------------
+export type ActionColor = "red" | "amber" | "green" | "grey";
+export interface ActionStatus { label: string; color: ActionColor; next: string; source: WorkItem["dueSource"] | "engagement" | "none"; secondary: string[] }
+
+export function actionStatus(f: LeadFact, today: string, rules: Rules, given?: WorkItem): ActionStatus {
+  const secondary: string[] = [];
+  const openDeals = (f.deals ?? []).filter((d) => d.status === "open");
+  if (openDeals.some((d) => d.via === "contact")) secondary.push("Open deal with contact");
+  else if (openDeals.length) secondary.push("Open deal on company");
+  if (!f.eligible) return { label: "Not eligible", color: "grey", next: f.ineligibleReason ? `Excluded: ${f.ineligibleReason}` : "Excluded", source: "none", secondary };
+  const w = given ?? leadWork(f, today, rules);
+  const n = w.overdueBusinessDays ?? 0;
+  const bd = `${n} business day${n === 1 ? "" : "s"}`;
+  const day = (x: string | null) => (x ? x : "");
+  const mk = (label: string, color: ActionColor, next: string, source: ActionStatus["source"]) => ({ label, color, next, source, secondary });
+  switch (w.dueSource) {
+    case "reply":
+      return n > 0 ? mk(`Reply unanswered · ${bd} overdue`, "red", "Respond to the prospect's reply", "reply") : mk("Prospect replied · respond today", "amber", "Respond to the prospect's reply", "reply");
+    case "task":
+      if (w.section === "overdue") return mk(`HubSpot task overdue by ${bd}`, "red", w.why, "task");
+      if (w.section === "today") return mk("HubSpot task due today", "amber", w.why, "task");
+      return mk(`HubSpot task due ${day(w.due)}`, "green", w.why, "task");
+    case "sla":
+      if (w.section === "overdue") return mk(`First outreach overdue by ${bd}`, "red", "Send first outreach", "sla");
+      if (w.section === "today") return mk("First outreach due today", "amber", "Send first outreach", "sla");
+      return mk(`First outreach due ${day(w.due)}`, "grey", "Send first outreach", "sla");
+    case "cadence":
+      if (w.section === "overdue") return mk(`Cadence follow-up overdue by ${bd}`, "red", `Follow up (touch ${f.touchesSinceEligibility + 1})`, "cadence");
+      if (w.section === "today") return mk(w.due === today ? "Cadence follow-up due today" : `Cadence follow-up due since ${day(w.due)}`, "amber", `Follow up (touch ${f.touchesSinceEligibility + 1})`, "cadence");
+      return mk(`On track · next follow-up by ${day(w.due)}`, "green", `Follow up by ${day(w.due)}`, "cadence");
+  }
+  if (w.section === "stale") return mk("No touch in 14+ business days", "grey", f.touchesSinceEligibility === 0 ? "Send first outreach" : "Follow up", "none");
+  if (w.action === "Review next step") return mk(`Cadence complete (${f.touchesSinceEligibility} touches)`, "green", "Review next step", "none");
+  if (w.action === "Monitor" && contactLevelInPlay(f) && f.touchesSinceEligibility > 0) {
+    const r = f.inPlayReason ?? "";
+    return mk(/^Meeting/.test(r) ? "In conversation · meeting" : /^Prospect replied/.test(r) ? "In conversation · reply answered" : "In conversation · deal with contact", "green", "Coordinate with the AE", "engagement");
+  }
+  if (w.action === "Paused") return mk(/Disqualified/.test(w.why) ? "Paused · disqualified" : "Paused · recently closed lost", "grey", "No outreach needed now", "none");
+  return mk("Review next action", "grey", openDeals.length && !openDeals.some((d) => d.via === "contact") ? "Check with the AE before outreach" : "No reliable deadline: decide the next step", "none");
 }

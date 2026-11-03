@@ -105,3 +105,14 @@ describe("14-business-day inactivity", () => {
     assert.equal(overdueSource(leadWork(computeLeadFacts(ds, R, T)[0]!, T, R))!.label, "HubSpot task overdue by 4 business days");
   });
 });
+
+test("a HubSpot task due today is the primary action even with an account-level open deal", async () => {
+  const { actionStatus } = await import("../src/index.js");
+  const ds = dataset({ acts: [act({ ts: "2026-10-26" })], deals: [deal({ contactIds: [] })],
+    tasks: [{ id: "t", dueDate: "2026-10-30T09:00:00Z", status: "NOT_STARTED", taskType: "CALL", ownerId: BOBBI, subject: "Call back", contactIds: ["c1"] }] });
+  const a = actionStatus(computeLeadFacts(ds, R, T)[0]!, T, R);
+  assert.equal(a.label, "HubSpot task due today"); assert.equal(a.color, "amber");
+  assert.deepEqual(a.secondary, ["Open deal on company"]);
+  const noTask = actionStatus(computeLeadFacts(dataset({ acts: [act({ ts: "2026-10-26" })], deals: [deal({ contactIds: [] })] }), R, T)[0]!, T, R);
+  assert.equal(noTask.label, "Review next action"); assert.equal(noTask.color, "grey");
+});
