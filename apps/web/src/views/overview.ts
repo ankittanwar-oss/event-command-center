@@ -1,4 +1,5 @@
 import { api } from "../api.js";
+import { openAccountDrill } from "../accountDrill.js";
 import { openLeads } from "../drawer.js";
 import { buildHash, filterParams, type FilterState, type Route } from "../state.js";
 import { bar, delta, flag, fmt, h, RISK, riskBar, riskPill, table, type Col, type Risk } from "../ui.js";
@@ -218,22 +219,29 @@ export async function overviewView(route: Route): Promise<HTMLElement> {
 
   // ---- ACCOUNT EXECUTION (primary): unique HubSpot companies per SDR. Worked = 1+ qualifying SDR outreach to any eligible event contact.
   const AX = d.accountExec;
-  const axRow = (name: any, r: any, patch: Partial<FilterState>) => h("tr", null, h("td", null, name),
-    h("td", { class: "sc sc-n" }, h("div", { class: "scb" }, fmt.n(r.accounts))),
-    h("td", { class: `sc ${colour(r.coveragePct, PC.coverageTarget)}`, title: "Accounts worked / eligible accounts" }, h("div", { class: "scb" }, fmt.n(r.worked)), h("div", { class: "scs" }, `${fmt.pct(r.coveragePct)} coverage`)),
-    h("td", { class: "sc sc-n" }, h("div", { class: "scb" }, fmt.n(r.notWorked))),
-    h("td", { class: "sc sc-n", title: "Worked accounts where a further touch is due with an active contact" }, h("div", { class: "scb" }, fmt.n(r.needFollowUp))),
-    h("td", { class: "sc sc-n" }, h("div", { class: "scb" }, fmt.n(r.contactsWorked)), h("div", { class: "scs" }, `of ${fmt.n(r.contacts)} · ${fmt.pct(r.contactCoveragePct)}`)),
-    h("td", { class: "sc sc-n" }, h("div", { class: "scb" }, `${fmt.n(r.oneContactWorked)} / ${fmt.n(r.twoPlusWorked)}`)),
-    h("td", { class: "sc sc-n" }, h("div", { class: "scb" }, fmt.n(r.active))),
-    h("td", { class: "sc sc-n" }, h("div", { class: "scb" }, fmt.n(r.paused)), h("div", { class: "scs" }, `${fmt.n(r.pausedCompanyWide)} company-wide`)),
-    h("td", { class: "sc sc-n" }, h("div", { class: "scb" }, fmt.n(r.qualified))));
+  // Every number opens the companies behind it (same predicate, filters and SDR attribution as the count).
+  const drill = (metric: string, r: any, rowName: string, label: string) => (e: Event) => { e.stopPropagation(); openAccountDrill(f, metric, r.ownerId ?? "", rowName, label); };
+  const ax = (metric: string, r: any, rowName: string, label: string, big: string, small = "", cls = "sc-n", tip = "") =>
+    h("td", { class: `sc ${cls}`, title: tip || `Show the ${label.toLowerCase()}`, onclick: drill(metric, r, rowName, label) }, h("div", { class: "scb" }, big), small ? h("div", { class: "scs" }, small) : null);
+  const axRow = (name: any, r: any, rowName: string) => h("tr", null, h("td", null, name),
+    ax("eligible", r, rowName, "Eligible accounts", fmt.n(r.accounts)),
+    ax("worked", r, rowName, "Accounts worked", fmt.n(r.worked), `${fmt.pct(r.coveragePct)} coverage`, colour(r.coveragePct, PC.coverageTarget), "Accounts worked / eligible accounts"),
+    ax("not_worked", r, rowName, "Not worked", fmt.n(r.notWorked)),
+    ax("need_follow_up", r, rowName, "Need follow-up", fmt.n(r.needFollowUp)),
+    ax("contacts_worked", r, rowName, "Contacts worked", fmt.n(r.contactsWorked), `of ${fmt.n(r.contacts)} · ${fmt.pct(r.contactCoveragePct)}`),
+    h("td", { class: "sc sc-n" }, h("div", { class: "scb" },
+      h("span", { class: "link", onclick: drill("one_contact", r, rowName, "Accounts with 1 contact worked") }, fmt.n(r.oneContactWorked)), " / ",
+      h("span", { class: "link", onclick: drill("two_plus", r, rowName, "Accounts with 2+ contacts worked") }, fmt.n(r.twoPlusWorked)))),
+    ax("active", r, rowName, "In conversation", fmt.n(r.active)),
+    h("td", { class: "sc sc-n", onclick: drill("paused", r, rowName, "Paused / closed") }, h("div", { class: "scb" }, fmt.n(r.paused)),
+      h("div", { class: "scs" }, h("span", { class: "link", onclick: drill("paused_company", r, rowName, "Paused company-wide") }, `${fmt.n(r.pausedCompanyWide)} company-wide`))),
+    ax("qualified", r, rowName, "Qualified", fmt.n(r.qualified)));
   const dispList = (m: Record<string, number>) => Object.entries(m).length ? Object.entries(m).sort((a, b) => b[1] - a[1]).map(([k, n]) => h("div", null, `${AX?.dispositionCodes?.[k] ?? k}: ${fmt.n(n)}`)) : h("div", { class: "faint" }, "None recorded");
   const accountExec = AX ? h("div", { class: "card scard" },
     h("div", { class: "hd" }, h("span", { class: "t" }, "Account execution"), h("span", { class: "muted", style: "margin-left:auto" }, "Primary measure · unique HubSpot companies · worked = 1+ qualifying SDR outreach to any eligible event contact")),
     h("div", { class: "tbl-wrap" }, h("table", { class: "sctable" },
       h("thead", null, h("tr", null, ["SDR", "Eligible accounts", "Accounts worked", "Not worked", "Need follow-up", "Contacts worked", "Accounts 1 / 2+ contacts", "In conversation", "Paused / closed", "Qualified"].map((x, i) => h("th", { class: i ? "n" : "" }, x)))),
-      h("tbody", null, AX.perSdr.map((r: any) => axRow(r.name, r, { sdr: r.ownerId, region: "" })), AX.perSdr.length > 1 ? axRow(h("b", null, "All"), AX.all, {}) : null))),
+      h("tbody", null, AX.perSdr.map((r: any) => axRow(r.name, r, r.name)), AX.perSdr.length > 1 ? axRow(h("b", null, "All"), AX.all, "All SDRs") : null))),
     h("details", { class: "dmore", style: "padding: 0 14px 10px" }, h("summary", null, "Why worked accounts are not being pursued (verified dispositions)"),
       h("div", { class: "grid2" }, h("div", null, h("b", null, "Account-level (company-wide)"), dispList(AX.all.dispositions.company)), h("div", null, h("b", null, "Contact-level"), dispList(AX.all.dispositions.contact)))),
     h("div", { class: "legend", style: "padding: 8px 14px" }, "Contacts = eligible event contacts (not every CRM contact at the company). The event-lead table below keeps the original event-lead denominators.")) : null;

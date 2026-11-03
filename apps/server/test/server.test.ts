@@ -254,6 +254,20 @@ describe("API views", () => {
     assert.equal(Object.values(a.fu).reduce((x: number, y: any) => x + y, 0), a.touched);
     for (const [id, c] of Object.entries<any>(o.dims)) if (c.leads) assert.equal(drill("multi_touch", id), c.multi);
   });
+  test("account execution: every metric's drill-down returns exactly its count, per SDR and All", () => {
+    const q = new URLSearchParams("quarter=all");
+    const o: any = views.overview(facts, q, "2026-10-30", DEFAULT_RULES);
+    const map: Record<string, string> = { eligible: "accounts", worked: "worked", not_worked: "notWorked", need_follow_up: "needFollowUp", one_contact: "oneContactWorked", two_plus: "twoPlusWorked", active: "active", paused: "paused", paused_company: "pausedCompanyWide", qualified: "qualified" };
+    const rowsToCheck = [...o.accountExec.perSdr.map((r: any) => ({ r, sdr: r.ownerId })), { r: o.accountExec.all, sdr: "" }];
+    for (const { r, sdr } of rowsToCheck) {
+      for (const [metric, key] of Object.entries(map)) {
+        const d: any = views.accountDrill(facts, new URLSearchParams(`quarter=all&metric=${metric}&rowSdr=${sdr}`), "2026-10-30", DEFAULT_RULES);
+        assert.equal(d.accountCount, r[key], `${sdr || "All"} ${metric}`);
+      }
+      const c: any = views.accountDrill(facts, new URLSearchParams(`quarter=all&metric=contacts_worked&rowSdr=${sdr}`), "2026-10-30", DEFAULT_RULES);
+      assert.equal(c.contactCount, r.contactsWorked);
+    }
+  });
   test("daily command centre: every eligible account appears once, in exactly one timeliness group", () => {
     const d = views.daily(facts, new URLSearchParams("quarter=all"), "2026-10-30", DEFAULT_RULES);
     const eligibleAccounts = new Set(facts.filter((f: any) => f.eligible).map((f: any) => f.companyId ?? `c:${f.contactId}`));

@@ -57,6 +57,7 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL) {
       case "/api/overview": return send(res, 200, v.overview(s.facts, q, t, rules, await loadDispositions()));
       case "/api/leads": return send(res, 200, v.leads(s.facts, q, t, rules));
       case "/api/sdr": return send(res, 200, v.sdrs(s.facts, q, t, rules));
+      case "/api/account-drill": return send(res, 200, v.accountDrill(s.facts, q, t, rules, await loadDispositions()));
       case "/api/daily": return send(res, 200, v.daily(s.facts, q, t, rules, await loadDispositions()));
       case "/api/depth": return send(res, 200, v.depth(s.facts, q, t, rules));
       case "/api/accounts": return send(res, 200, v.accounts(s.facts, q, t, rules));

@@ -1,6 +1,6 @@
 import {
   accountQueue, applyFilters, BUCKETS, categoryBreakdown, CATEGORY_LABEL, dataQuality, eventSummaries, fiscalQuarterOf, inBucket, nextAction,
-  normalizeFilters, parseQuarterKey, worklist, leadDimensions, ACTION_HEALTH_LABEL, outreachTimeliness, inactivity, overdueSource, deadlineState, leadWork, contactLevelInPlay, actionStatus, contactWorklist, accountWorklist, accountSummary, ACCOUNT_BUCKETS, DISPOSITION_CODES, type DispositionSet, DEFAULT_RULES, dealOrder, type DealRef, depthStats, sdrDepth, accountDepth, WINDOW_LABEL, BANDS, type TouchWindow, findings, narrative, RISK_LABEL, riskCounts, riskOf, sdrRisk, previousQuarter, qoq, quarterMetrics, regionBreakdown, rosterById, SDR_ROSTER, sdrTable, STATUS_LABEL, temperatureSummary,
+  normalizeFilters, parseQuarterKey, worklist, leadDimensions, ACTION_HEALTH_LABEL, outreachTimeliness, inactivity, overdueSource, deadlineState, leadWork, contactLevelInPlay, actionStatus, contactWorklist, accountWorklist, accountSummary, ACCOUNT_BUCKETS, ACCOUNT_METRICS, DISPOSITION_CODES, type DispositionSet, DEFAULT_RULES, dealOrder, type DealRef, depthStats, sdrDepth, accountDepth, WINDOW_LABEL, BANDS, type TouchWindow, findings, narrative, RISK_LABEL, riskCounts, riskOf, sdrRisk, previousQuarter, qoq, quarterMetrics, regionBreakdown, rosterById, SDR_ROSTER, sdrTable, STATUS_LABEL, temperatureSummary,
   type EventCategory, type Filters, type LeadFact, type NormalizedFilters, type Region, type Rules,
 } from "@ecc/core";
 
@@ -464,4 +464,30 @@ export function daily(facts: LeadFact[], q: URLSearchParams, today: string, rule
   return { accountView: accountsOut, contacts, filters: nf, groups: DAILY_GROUPS, summary: summarise(accts), bySdr, accounts: accts.slice(0, 1500), total: accts.length,
     today, work: { sections: work.sections, counts: work.counts, total: work.items.length,
       items: work.items.slice(0, 2000).map((i) => ({ ...i, lastContact: { at: i.lastOutboundAt, by: ownerLabel(i.lastOutboundOwnerId, rules), sdrAt: i.currentSdrLastTouchAt, sdr: ownerLabel(i.sdrOwnerId, rules) } })) } };
+}
+
+
+/** Drill-down behind one Account execution cell: same rows, same SDR attribution, same predicate as the count. */
+export function accountDrill(facts: LeadFact[], q: URLSearchParams, today: string, rules: Rules, disp?: DispositionSet) {
+  const metric = q.get("metric") ?? "eligible";
+  const def = ACCOUNT_METRICS[metric];
+  if (!def) return { error: "Unknown metric" };
+  const rowSdr = q.get("rowSdr") ?? "";
+  const { nf, rows } = filtered(facts, q, today);
+  let items = contactWorklist(rows, today, rules, disp).items;
+  if (rowSdr) items = items.filter((i) => i.sdrOwnerId === rowSdr);
+  const accts = accountWorklist(items).filter(def.test).map((a) => {
+    const contacts = def.contactsOnly ? a.contacts.filter(def.contactsOnly) : a.contacts;
+    return {
+      key: a.key, companyId: a.companyId, companyName: a.companyName, intent: a.intent, sdrName: a.sdrName, bucket: a.bucket, worked: a.worked,
+      coverage: a.coverage, lastSdrTouch: a.lastSdrTouch, top: { action: a.top.action, color: a.top.color, overdueBusinessDays: a.top.overdueBusinessDays },
+      companyDisposition: a.companyDisposition,
+      events: [...new Map(a.contacts.flatMap((c) => c.events).map((e) => [e.id, e])).values()],
+      contacts: contacts.map((c) => ({ contactId: c.contactId, contactName: c.contactName, jobTitle: c.jobTitle, group: c.group, action: (c as any).multithread ? "Optional: multithread" : c.action,
+        reason: c.reason, color: c.color, yourTouches: c.yourTouches, lastOutboundAt: c.lastOutboundAt, lastBy: ownerLabel(c.lastOutboundOwnerId, rules), disposition: c.disposition,
+        otherSdrTouches: c.otherSdrTouches, eventIds: c.events.map((e) => e.id) })),
+    };
+  });
+  const contactCount = accts.reduce((n, a) => n + a.contacts.length, 0);
+  return { metric, label: def.label, contactMetric: !!def.contactsOnly, filters: nf, rowSdr, accounts: accts, accountCount: accts.length, contactCount };
 }

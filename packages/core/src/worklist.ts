@@ -603,8 +603,25 @@ export function accountWorklist(items: CItem[]) {
   return accounts;
 }
 
+type Acct = ReturnType<typeof accountWorklist>[number];
+/** Metric predicates: the SAME functions produce the CMO counts and the drill-down lists, so they always reconcile. */
+export const ACCOUNT_METRICS: Record<string, { label: string; test: (a: Acct) => boolean; contactsOnly?: (c: Acct["contacts"][number]) => boolean }> = {
+  eligible: { label: "Eligible accounts", test: () => true },
+  worked: { label: "Accounts worked", test: (a) => a.worked },
+  not_worked: { label: "Not worked", test: (a) => !a.worked },
+  need_follow_up: { label: "Need follow-up", test: (a) => a.bucket === "follow_up" },
+  contacts_worked: { label: "Contacts worked", test: (a) => a.coverage.worked > 0, contactsOnly: (c) => c.yourTouches > 0 },
+  one_contact: { label: "Accounts with 1 contact worked", test: (a) => a.coverage.worked === 1 },
+  two_plus: { label: "Accounts with 2+ contacts worked", test: (a) => a.coverage.worked >= 2 },
+  active: { label: "In conversation", test: (a) => a.conversation },
+  paused: { label: "Paused / closed", test: (a) => a.bucket === "paused" },
+  paused_company: { label: "Paused company-wide", test: (a) => !!a.companyDisposition },
+  qualified: { label: "Qualified", test: (a) => a.bucket === "qualified" },
+};
+
 /** Account-level execution summary (CMO + Daily). Counts unique company ids; contacts are eligible event contacts. */
 export function accountSummary(accounts: ReturnType<typeof accountWorklist>) {
+  const M = ACCOUNT_METRICS;
   const n = (p: (a: (typeof accounts)[number]) => boolean) => accounts.filter(p).length;
   const contacts = accounts.reduce((s, a) => s + a.coverage.available, 0);
   const contactsWorked = accounts.reduce((s, a) => s + a.coverage.worked, 0);
@@ -614,11 +631,11 @@ export function accountSummary(accounts: ReturnType<typeof accountWorklist>) {
     for (const c of a.contacts) if (c.disposition) contactDisp[c.disposition.code] = (contactDisp[c.disposition.code] ?? 0) + 1;
   }
   return {
-    accounts: accounts.length, worked: n((a) => a.worked), notWorked: n((a) => !a.worked),
-    coveragePct: accounts.length ? Math.round((n((a) => a.worked) / accounts.length) * 1000) / 10 : null,
-    needFollowUp: n((a) => a.bucket === "follow_up"), respond: n((a) => a.bucket === "respond"), active: n((a) => a.conversation),
-    qualified: n((a) => a.bucket === "qualified"), paused: n((a) => a.bucket === "paused"), pausedCompanyWide: n((a) => !!a.companyDisposition),
-    oneContactWorked: n((a) => a.coverage.worked === 1), twoPlusWorked: n((a) => a.coverage.worked >= 2),
+    accounts: accounts.length, worked: n(M.worked!.test), notWorked: n(M.not_worked!.test),
+    coveragePct: accounts.length ? Math.round((n(M.worked!.test) / accounts.length) * 1000) / 10 : null,
+    needFollowUp: n(M.need_follow_up!.test), respond: n((a) => a.bucket === "respond"), active: n(M.active!.test),
+    qualified: n(M.qualified!.test), paused: n(M.paused!.test), pausedCompanyWide: n(M.paused_company!.test),
+    oneContactWorked: n(M.one_contact!.test), twoPlusWorked: n(M.two_plus!.test),
     workedButQuiet: n((a) => a.worked && a.bucket === "follow_up"),
     contacts, contactsWorked, contactCoveragePct: contacts ? Math.round((contactsWorked / contacts) * 1000) / 10 : null,
     dispositions: { contact: contactDisp, company: companyDisp },
