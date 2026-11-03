@@ -170,40 +170,45 @@ export async function overviewView(route: Route): Promise<HTMLElement> {
   ];
 
   // ---- SDR scorecard (top of page): every cell coloured against a target, so gaps jump out
-  const tg = d.scorecardTargets ?? {};
+  const tg = { followUp: { green: 50, amber: 25, higherIsBetter: true }, ...(d.scorecardTargets ?? {}) };
   const grade = (key: string, v: number | null) => {
-    const t = tg[key];
+    const t = (tg as any)[key];
     if (v === null || v === undefined || !t) return "sc-n";
     if (t.higherIsBetter) return v >= t.green ? "sc-g" : v >= t.amber ? "sc-a" : "sc-r";
     return v <= t.green ? "sc-g" : v <= t.amber ? "sc-a" : "sc-r";
   };
-  const tgtText = (key: string, unit = "%") => { const t = tg[key]; return t ? `Green ${t.higherIsBetter ? "≥" : "≤"} ${t.green}${unit} · amber ${t.higherIsBetter ? "≥" : "≤"} ${t.amber}${unit} · otherwise red` : ""; };
+  const pc = (n: number, of: number) => (of ? Math.round((n / of) * 100) : null);
   const scRows = d.sdrs.map((r: any) => {
     const dp = d.depth?.[r.ownerId];
     const leads = dp?.measuredLeads ?? 0;
-    const coverage = leads ? Math.round(((leads - (dp?.bands?.b0 ?? 0)) / leads) * 1000) / 10 : null;
+    const reached = leads - (dp?.bands?.b0 ?? 0);
+    const followed = reached - (dp?.bands?.b1 ?? 0);
     const met = (r.hotSla?.met ?? 0) + (r.warmSla?.met ?? 0), dec = (r.hotSla?.decided ?? 0) + (r.warmSla?.decided ?? 0);
-    return { r, leads, accounts: dp?.accounts ?? 0, coverage, sla: dec ? Math.round((met / dec) * 1000) / 10 : null, avgTouches: dp?.avgPerLead ?? null,
-      atTarget: dp?.atTargetPct ?? null, oneTouch: coverage ? dp?.oneTouchPct ?? null : null, multiWeek: r.mature14Leads ? r.multiWeekPct : null, overdue: (sr(r.ownerId)?.hotOverdue ?? 0) + (sr(r.ownerId)?.warmOverdue ?? 0) };
-  }).filter((x: any) => x.leads > 0).sort((a: any, b: any) => b.overdue - a.overdue || (a.coverage ?? 0) - (b.coverage ?? 0));
-  const cell = (key: string, v: number | null, txt: string, bucket?: string, ownerId?: string) =>
-    h("td", { class: `sc ${grade(key, v)}`, title: tgtText(key, key === "avgTouches" || key === "overdue" ? "" : "%"),
-      onclick: bucket && ownerId ? () => open(bucket, { sdr: ownerId, region: "" }) : undefined }, txt);
+    return { r, leads, reached, followed, met, dec, overdue: (sr(r.ownerId)?.hotOverdue ?? 0) + (sr(r.ownerId)?.warmOverdue ?? 0) };
+  }).filter((x: any) => x.leads > 0).sort((a: any, b: any) => b.overdue - a.overdue || (pc(a.reached, a.leads) ?? 0) - (pc(b.reached, b.leads) ?? 0));
+  // Each cell: big count, small "of N" underneath. Colour = how that count compares with target.
+  const cell = (key: string, v: number | null, big: string, small: string, tip: string, bucket: string, ownerId: string) =>
+    h("td", { class: `sc ${grade(key, v)}`, title: tip, onclick: () => open(bucket, { sdr: ownerId, region: "" }) },
+      h("div", { class: "scb" }, big), small ? h("div", { class: "scs" }, small) : null);
   const scorecard = h("div", { class: "card scard" },
-    h("div", { class: "hd" }, h("span", { class: "t" }, "SDR scorecard"), h("span", { class: "muted", style: "margin-left:auto" }, "Each cell vs target · green on track · amber slipping · red lacking · click a cell for the leads")),
+    h("div", { class: "hd" }, h("span", { class: "t" }, "SDR scorecard"),
+      h("span", { class: "muted", style: "margin-left:auto" }, h("b", { class: "g-t" }, "● on track  "), h("b", { class: "a-t" }, "● slipping  "), h("b", { class: "r-t" }, "● behind"), " · click any cell for the leads")),
     scRows.length ? h("div", { class: "tbl-wrap" }, h("table", { class: "sctable" },
-      h("thead", null, h("tr", null, ["SDR", "Leads", "Coverage", "SLA met", "Touches/lead", `${tgtMin}+ touches`, "1-touch", "Multi-wk", "Overdue"].map((x, i) => h("th", { class: i > 0 ? "n" : "" }, x)))),
+      h("thead", null, h("tr", null,
+        h("th", null, "SDR"), h("th", { class: "n" }, "Leads"),
+        h("th", { class: "n", title: "Leads with at least one SDR touch" }, "Reached"),
+        h("th", { class: "n", title: "Reached leads touched 2+ times" }, "Followed up"),
+        h("th", { class: "n", title: `First touch on time – only leads eligible since ${fmt.day(d.slaStartDate ?? "2026-10-30")}` }, `On time (since ${fmt.day(d.slaStartDate ?? "2026-10-30")})`),
+        h("th", { class: "n", title: "Past the first-touch deadline with no outreach" }, "Overdue now"))),
       h("tbody", null, scRows.map((x: any) => h("tr", null,
-        h("td", null, h("span", { class: "link", onclick: () => open("eligible", { sdr: x.r.ownerId, region: "" }, x.r.name) }, x.r.name), h("span", { class: "faint" }, ` ${x.r.region}`)),
-        h("td", { class: "n sc-n" }, `${x.leads}`),
-        cell("coverage", x.coverage, fmt.pct(x.coverage), "untouched", x.r.ownerId),
-        cell("sla", x.sla, fmt.pct(x.sla), "sla_missed", x.r.ownerId),
-        cell("avgTouches", x.avgTouches, fmt.dec(x.avgTouches), "one_touch", x.r.ownerId),
-        cell("atTarget", x.atTarget, fmt.pct(x.atTarget), "multi_touch", x.r.ownerId),
-        cell("oneTouch", x.oneTouch, fmt.pct(x.oneTouch), "one_touch", x.r.ownerId),
-        cell("multiWeek", x.multiWeek, fmt.pct(x.multiWeek), "multi_week", x.r.ownerId),
-        cell("overdue", x.overdue, String(x.overdue), "overdue", x.r.ownerId)))))) : h("div", { class: "empty" }, "No SDR has eligible leads in this view."),
-    h("div", { class: "legend", style: "padding: 8px 14px" }, "Targets are editable under Admin → Business rules → scorecardTargets. Hover a cell to see its target."));
+        h("td", null, h("span", { class: "link", onclick: () => open("eligible", { sdr: x.r.ownerId, region: "" }, x.r.name) }, x.r.name)),
+        h("td", { class: "n sc-n" }, h("div", { class: "scb" }, `${x.leads}`)),
+        cell("coverage", pc(x.reached, x.leads), `${x.reached}`, `of ${x.leads}`, `${x.leads - x.reached} not reached yet`, "untouched", x.r.ownerId),
+        cell("followUp", pc(x.followed, x.reached), `${x.followed}`, `of ${x.reached}`, `${x.reached - x.followed} touched only once`, "one_touch", x.r.ownerId),
+        x.dec ? cell("sla", pc(x.met, x.dec), `${x.met}`, `of ${x.dec}`, `${x.dec - x.met} first touched late or not at all`, "sla_missed", x.r.ownerId)
+          : h("td", { class: "sc sc-n", title: "No leads due under the SLA yet" }, h("div", { class: "scb faint" }, "–"), h("div", { class: "scs" }, "none due")),
+        cell("overdue", x.overdue, `${x.overdue}`, "", "Leads past the first-touch deadline with no outreach", "overdue", x.r.ownerId)))))) : h("div", { class: "empty" }, "No SDR has eligible leads in this view."),
+    h("div", { class: "legend", style: "padding: 8px 14px" }, "Targets: reached 80% · followed up 50% · on time 80% · overdue 0. Editable in Admin → Business rules."));
 
   return h("div", null,
     narrative,

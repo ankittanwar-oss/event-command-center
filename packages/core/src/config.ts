@@ -66,6 +66,8 @@ export interface Rules {
   requireHotWarm: boolean;
   /** Events dated before this day (YYYY-MM-DD) are hidden from every view and count. null = keep all. Undated events are kept. */
   minEventDate: string | null;
+  /** First-touch SLA only applies to leads that became eligible on/after this day (YYYY-MM-DD). null = always. */
+  slaStartDate: string | null;
   /** Pod routing: company owner (AE) id -> pod SDR id. If the company's SDR Owner is not one of these pod SDRs, the pod SDR owns it. */
   podAeToSdr: Record<string, string>;
   /** CMO scorecard thresholds: [green at or better than, amber at or better than]; worse is red. */
@@ -121,6 +123,7 @@ export const DEFAULT_RULES: Rules = {
   excludedCompanies: ["The Channel Company"],
   requireHotWarm: false,
   minEventDate: "2026-08-01",
+  slaStartDate: "2026-10-30",
   scorecardTargets: {
     coverage: { green: 80, amber: 50, higherIsBetter: true },        // % of eligible leads touched at least once
     sla: { green: 80, amber: 60, higherIsBetter: true },             // % first touch within SLA
@@ -129,6 +132,7 @@ export const DEFAULT_RULES: Rules = {
     oneTouch: { green: 20, amber: 40, higherIsBetter: false },       // % of leads with exactly one touch
     multiWeek: { green: 60, amber: 30, higherIsBetter: true },       // % worked in 2+ weeks (leads 14+ days old)
     overdue: { green: 0, amber: 5, higherIsBetter: false },          // leads past first-touch SLA, no outreach
+    followUp: { green: 50, amber: 25, higherIsBetter: true },        // % of reached leads touched 2+ times
   },
   podAeToSdr: {
     "79976078": "87607260",   // Allison Green   -> Bobbi Bukovac

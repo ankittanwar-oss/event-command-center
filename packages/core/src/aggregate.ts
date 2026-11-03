@@ -49,10 +49,11 @@ export function normalizeFilters(f: Filters, today: string): NormalizedFilters {
 export function applyFilters(facts: LeadFact[], nf: NormalizedFilters): LeadFact[] {
   const s = (nf.search || "").trim().toLowerCase();
   return facts.filter((f) => {
-    if (nf.quarterRange && (!f.eventDate || f.eventDate < nf.quarterRange.start || f.eventDate > nf.quarterRange.end)) return false;
+    // Picking specific events overrides the quarter filter (events are chosen explicitly).
+    if (!nf.eventId && nf.quarterRange && (!f.eventDate || f.eventDate < nf.quarterRange.start || f.eventDate > nf.quarterRange.end)) return false;
     if (nf.region && f.sdrRegion !== nf.region) return false;
     if (nf.sdr && f.sdrOwnerId !== nf.sdr) return false;
-    if (nf.eventId && f.eventId !== nf.eventId) return false;
+    if (nf.eventId && !nf.eventId.split(",").includes(f.eventId)) return false;
     if (nf.category && f.eventCategory !== nf.category) return false;
     if (nf.temperature && f.temperature !== nf.temperature) return false;
     if (nf.status && f.status !== nf.status) return false;

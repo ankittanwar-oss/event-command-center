@@ -43,7 +43,7 @@ export async function openLeads(filters: FilterState, bucket: string, extra: Rec
     const active = [
       filters.region && `Region: ${filters.region}`, filters.sdr && `SDR: ${sdrNames.get(filters.sdr) ?? filters.sdr}`,
       filters.category && `Category: ${filters.category}`, filters.temperature && `Temperature: ${filters.temperature}`,
-      filters.eventId && `Event: ${r.rows[0]?.eventName ?? filters.eventId}`, filters.search && `Search: “${filters.search}”`,
+      filters.eventId && (filters.eventId.includes(",") ? `Events: ${filters.eventId.split(",").length} selected` : `Event: ${r.rows[0]?.eventName ?? filters.eventId}`), filters.search && `Search: “${filters.search}”`,
     ].filter(Boolean) as string[];
     // Surface records whose status may look surprising for this KPI, without changing the KPI itself.
     const inPlayNoTouch = r.rows.filter((x: any) => x.status === "in_play" && x.touchesSinceEligibility === 0).length;

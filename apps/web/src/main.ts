@@ -54,10 +54,32 @@ function filterBar(route: Route): HTMLElement {
     sel("region", [["", "All regions"], ["NAM", "NAM"], ["EMEA", "EMEA"], ["APAC", "APAC"]], "Region"),
     sel("sdr", [["", f.region ? `All ${f.region} SDRs` : "All SDRs"], ...roster.map((s: any) => [s.ownerId, s.name] as [string, string])], "SDR"),
     sel("category", [["", "All categories"], ["owned", "Owned"], ["sponsored", "Sponsored"], ["webinar", "Webinars"], ["roundtable", "Roundtables"]], "Category"),
-    sel("eventId", [["", "All events"], ...meta.events.slice(0, 300).map((e: any) => [e.id, `${(e.name ?? "").slice(0, 40)} · ${fmt.day(e.date)}`] as [string, string])], "Event"),
+    eventPicker(f.eventId, (v) => go({ eventId: v })),
     search,
     h("button", { class: "reset", onclick: () => { location.hash = buildHash(route.view, { quarter: "this" }); } }, "Reset"),
   );
+}
+
+/** Multi-select event filter: tick any number of events, then Apply. Stored as comma-separated ids. */
+function eventPicker(current: string, apply: (v: string) => void): HTMLElement {
+  const chosen = new Set(current ? current.split(",") : []);
+  const label = () => chosen.size === 0 ? "All events" : chosen.size === 1 ? (meta.events.find((e: any) => chosen.has(e.id))?.name ?? "1 event").slice(0, 28) : `${chosen.size} events`;
+  const btn = h("button", { type: "button", class: "reset" }, `${label()} ▾`);
+  const menu = h("div", { class: "evmenu", style: "display:none" },
+    meta.events.slice(0, 300).map((e: any) => {
+      const cb = h("input", { type: "checkbox" }) as HTMLInputElement;
+      cb.checked = chosen.has(e.id);
+      cb.addEventListener("change", () => { if (cb.checked) chosen.add(e.id); else chosen.delete(e.id); btn.textContent = `${label()} ▾`; });
+      return h("label", null, cb, h("span", null, `${e.name ?? ""} · ${fmt.day(e.date)}`));
+    }),
+    h("div", { class: "evact" },
+      h("button", { type: "button", onclick: () => apply([...chosen].join(",")) }, "Apply"),
+      h("button", { type: "button", class: "reset", onclick: () => apply("") }, "Clear")));
+  const wrap = h("div", { class: "evpick" }, btn, menu);
+  btn.addEventListener("click", (e) => { e.stopPropagation(); menu.style.display = menu.style.display === "none" ? "block" : "none"; });
+  menu.addEventListener("click", (e) => e.stopPropagation());
+  document.addEventListener("click", () => { menu.style.display = "none"; });
+  return wrap;
 }
 
 function freshnessBadge(): HTMLElement {

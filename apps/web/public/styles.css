@@ -378,3 +378,13 @@ tr.row-crit td { background: color-mix(in srgb, var(--crit-soft) 40%, transparen
 .sc-n { color: var(--muted); }
 .sctable td.sc:hover { filter: brightness(.96); }
 @media (prefers-color-scheme: dark) { .sc-g { background: #0f3a24; color: #75e0a7; } .sc-a { background: #4a3510; color: #fec84b; } .sc-r { background: #4a1714; color: #fda29b; } }
+.sctable td.sc { text-align: center; cursor: pointer; }
+.sctable .scb { font-size: 18px; font-weight: 700; line-height: 1.1; }
+.sctable .scs { font-size: 11px; opacity: .7; font-weight: 500; }
+.g-t { color: #15803d; } .a-t { color: #b45309; } .r-t { color: #b91c1c; }
+.evpick { position: relative; }
+.evpick > button { min-width: 160px; text-align: left; }
+.evpick .evmenu { position: absolute; z-index: 50; top: 100%; left: 0; margin-top: 4px; width: 360px; max-height: 420px; overflow: auto; background: var(--card, #fff); border: 1px solid var(--line, #ddd); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.15); padding: 6px; }
+.evpick .evmenu label { display: flex; gap: 8px; align-items: center; padding: 4px 6px; font-size: 13px; cursor: pointer; border-radius: 4px; }
+.evpick .evmenu label:hover { background: rgba(0,0,0,.05); }
+.evpick .evact { display: flex; gap: 6px; padding: 6px; border-top: 1px solid var(--line, #ddd); position: sticky; bottom: -6px; background: inherit; }

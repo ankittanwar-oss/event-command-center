@@ -240,7 +240,8 @@ export function computeLeadFact(
     status = "active"; statusReason = `${sinceElig.length} touches across ${weeks.size} week(s)`;
   } else { status = "first_touch"; statusReason = `${sinceElig.length} of ${Math.max(expected, 2)} expected touches`; }
 
-  const noSla = status === "recently_lost";
+  // No SLA for recently-lost accounts, or for leads that became eligible before the SLA started (rules.slaStartDate).
+  const noSla = status === "recently_lost" || (!!rules.slaStartDate && !!eligibilityDate && eligibilityDate < rules.slaStartDate);
   const insufficient = eligible && sinceElig.length > 0 && !inPlayReason && !noSla && (sinceElig.length < expected || status === "stalled");
 
   const icpPriority = !!tier && PRIORITY_TIERS.has(tier);
