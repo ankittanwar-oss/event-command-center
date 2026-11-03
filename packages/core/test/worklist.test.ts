@@ -126,3 +126,39 @@ test("current SDR's own touches before a later allocation date count; another SD
   assert.equal(f.status === "never_worked", false);
   assert.equal(f.firstTouchSlaMet, true);
 });
+
+describe("contact worklist", () => {
+  test("one row per contact; touches are distinct activities; groups are exclusive", async () => {
+    const { contactWorklist } = await import("../src/index.js");
+    const ds = dataset({ events: [event(), event({ id: "e2", date: "2026-10-05" })], links: [["e1", "c1"], ["e2", "c1"]], acts: [act({ ts: "2026-10-27" })] });
+    const wl = contactWorklist(computeLeadFacts(ds, R, T), T, R);
+    assert.equal(wl.items.length, 1);
+    assert.equal(wl.items[0]!.sdrTouchesAny, 1);
+    assert.equal(wl.items[0]!.events.length, 2);
+    assert.equal(Object.values(wl.counts).reduce((a, b) => a + b, 0), 1);
+  });
+  test("your touches include the SDR's own work before a later allocation date, never another rep's", async () => {
+    const { contactWorklist } = await import("../src/index.js");
+    const ds = dataset({ companies: [company({ allocationDate: "2026-10-27" })], acts: [act({ ts: "2026-10-13" }), act({ ts: "2026-10-12", ownerId: DISHA })] });
+    const i = contactWorklist(computeLeadFacts(ds, R, T), T, R).items[0]!;
+    assert.equal(i.yourTouches, 1); assert.equal(i.otherSdrTouches, 1); assert.notEqual(i.action, "Send first outreach");
+  });
+  test("account-only deal -> Coordinate with AE (grey); a task due today still wins", async () => {
+    const { contactAction } = await import("../src/index.js");
+    const a = contactAction(computeLeadFacts(dataset({ deals: [deal({ contactIds: [] })] }), R, T)[0]!, T, R);
+    assert.equal(a.group, "coordinate"); assert.equal(a.color, "grey"); assert.equal(a.action, "Confirm next step with AE");
+    const t = contactAction(computeLeadFacts(dataset({ deals: [deal({ contactIds: [] })], tasks: [{ id: "t", dueDate: "2026-10-30T10:00:00Z", status: "NOT_STARTED", taskType: "CALL", ownerId: BOBBI, subject: "Call", contactIds: ["c1"] }] }), R, T)[0]!, T, R);
+    assert.equal(t.group, "respond"); assert.equal(t.color, "amber");
+  });
+  test("zero touches with no SLA deadline is grey, not red", async () => {
+    const { contactAction } = await import("../src/index.js");
+    const a = contactAction(computeLeadFacts(dataset(), rules({ slaStartDate: "2026-10-30" }), T)[0]!, T, rules({ slaStartDate: "2026-10-30" }));
+    assert.equal(a.group, "reach_out"); assert.equal(a.color, "grey");
+  });
+});
+
+test("auto-replies are not prospect replies", () => {
+  const ds = dataset({ acts: [act({ ts: "2026-10-27T16:20:31Z" }), act({ ts: "2026-10-27T16:20:45Z", kind: "INCOMING_EMAIL", direction: "INCOMING_EMAIL", title: "Automatic reply: Invitation to Beacon Event" })] });
+  const f = computeLeadFacts(ds, R, T)[0]!;
+  assert.equal(f.lastReplyAt, null); assert.notEqual(f.status, "in_play");
+});

@@ -1,128 +1,135 @@
 import { api } from "../api.js";
-import { lastContactText, leadTable, openLead } from "../drawer.js";
+import { openCustom, openLead } from "../drawer.js";
 import { buildHash, filterParams, type Route } from "../state.js";
-import { fmt, h, hsLink, tempPill } from "../ui.js";
+import { dealTable, fmt, h, hsLink, tempPill } from "../ui.js";
 
-// Daily Command Centre: the SDR's worklist. One row per account, one next action, placed in exactly one section.
-// Timeliness reporting (reached out on time / late / not reached) lives in the CMO overview and SDR execution views.
+// Daily Command Centre: one row per contact, grouped by what to do next.
+// Respond · Reach out · Follow up · Coordinate with AE, plus "In progress / no action now" kept out of the way.
+// Event-level reporting (CMO overview, drill-downs) is unchanged; this view only regroups the same records.
 
-const BLOCKS = [
-  { key: "respond", label: "Replies needing attention" },
-  { key: "overdue", label: "Overdue actions" },
-  { key: "today", label: "Due today" },
-  { key: "upcoming", label: "Upcoming actions" },
-] as const;
-const PRIMARY = new Set(["respond", "overdue", "today"]);
-const ACTIONS = ["Respond", "Send first outreach", "Follow up", "Complete HubSpot task", "Monitor", "Paused", "Review next step", "Needs review"];
+const ACTION_GROUPS = ["respond", "reach_out", "follow_up", "coordinate"];
+const PAGE = 100;
+
+const who = (o: any) => (o ? `${o.name ?? "Unknown user"}${o.role ? ` (${o.role})` : ""}` : null);
 
 export async function dailyView(route: Route, meta: any): Promise<HTMLElement> {
   const f = route.filters;
   const x = route.extra;
   const d = await api("daily", filterParams(f));
-  const w = d.work;
-  const today: string = d.today ?? meta?.today;
+  const C = d.contacts;
   const go = (patch: Record<string, string>) => { location.hash = buildHash("daily", f, { ...Object.fromEntries(x), ...patch }); };
+  const grp = x.get("g") ?? "";
+  const q = (x.get("q") ?? "").toLowerCase(), temp = x.get("temp") ?? "", ev = x.get("ev") ?? "";
 
-  // ---- local controls (do not change the global filters)
-  const q = (x.get("q") ?? "").toLowerCase();
-  const act = x.get("act") ?? "", ev = x.get("ev") ?? "", temp = x.get("temp") ?? "", sort = x.get("sort") ?? "urgency", only = x.get("sec") ?? "";
-  const items: any[] = w.items.filter((i: any) =>
-    (!q || [i.companyName, i.contactName, i.jobTitle, i.eventName].some((v) => (v ?? "").toLowerCase().includes(q))) &&
-    (!act || i.action === act) && (!ev || i.events.some((e: any) => e.id === ev)) &&
-    (!temp || (temp === "HotWarm" ? i.temperature === "Hot" || i.temperature === "Warm" : i.temperature === temp)));
-  if (sort === "due") items.sort((a, b) => (a.due ?? "9999").localeCompare(b.due ?? "9999"));
-  const count = (k: string) => items.filter((i) => i.section === k).length;
+  const base: any[] = C.items.filter((i: any) =>
+    (!q || [i.companyName, i.contactName, i.jobTitle, ...i.events.map((e: any) => e.name)].some((v) => (v ?? "").toLowerCase().includes(q))) &&
+    (!temp || (temp === "HotWarm" ? i.temperature === "Hot" || i.temperature === "Warm" : i.temperature === temp)) &&
+    (!ev || i.events.some((e: any) => e.id === ev)));
+  const count = (k: string) => base.filter((i) => i.group === k).length;
 
-  const blocks = h("div", { class: "wblocks" }, BLOCKS.map((b) =>
-    h("button", { class: `wblock ${b.key} ${only === b.key ? "sel" : ""}`, title: w.sections.find((s: any) => s.key === b.key)?.hint,
-      onclick: () => go({ sec: only === b.key ? "" : b.key }) },
-      h("span", { class: "wv" }, fmt.n(count(b.key))), h("span", { class: "wl" }, b.label))));
+  // ---- group tabs (counts reflect search/temperature/event filters)
+  const tab = (k: string, label: string, hint: string) => h("button", { class: `gtab g-${k} ${grp === k ? "sel" : ""}`, title: hint, onclick: () => go({ g: grp === k ? "" : k }) },
+    h("span", { class: "gv" }, fmt.n(count(k))), h("span", { class: "gl" }, label));
+  const groups: any[] = C.groups;
+  const tabs = h("div", { class: "gtabs" },
+    groups.filter((g) => ACTION_GROUPS.includes(g.key)).map((g) => tab(g.key, g.label, g.hint)),
+    h("span", { class: "gsep" }),
+    (() => { const g = groups.find((y) => y.key === "progress"); return tab(g.key, g.label, g.hint); })());
 
-  const search = h("input", { type: "search", placeholder: "Search account, contact, event", value: x.get("q") ?? "" }) as HTMLInputElement;
+  // ---- controls
+  const search = h("input", { type: "search", placeholder: "Search company, contact, title, event", value: x.get("q") ?? "" }) as HTMLInputElement;
   search.addEventListener("keydown", (e) => { if ((e as KeyboardEvent).key === "Enter") go({ q: search.value.trim() }); });
-  const sel = (key: string, cur: string, opts: Array<[string, string]>) => {
-    const s = h("select", { onchange: (e: Event) => go({ [key]: (e.target as HTMLSelectElement).value }) },
-      opts.map(([v, l]) => { const o = h("option", { value: v }, l) as HTMLOptionElement; if (v === cur) o.selected = true; return o; }));
-    return s;
-  };
+  const sel = (key: string, cur: string, opts: Array<[string, string]>) => h("select", { onchange: (e: Event) => go({ [key]: (e.target as HTMLSelectElement).value }) },
+    opts.map(([v, l]) => { const o = h("option", { value: v }, l) as HTMLOptionElement; if (v === cur) o.selected = true; return o; }));
   const evs = new Map<string, string>();
-  for (const i of w.items) for (const e of i.events) evs.set(e.id, `${(e.name ?? "").slice(0, 38)} · ${fmt.day(e.date)}`);
+  for (const i of C.items) for (const e of i.events) evs.set(e.id, `${(e.name ?? "").slice(0, 40)} · ${fmt.day(e.date)}`);
   const controls = h("div", { class: "wctl" }, search,
-    sel("act", act, [["", "All actions"], ...ACTIONS.map((a) => [a, a] as [string, string])]),
-    sel("ev", ev, [["", "All events in list"], ...[...evs.entries()]]),
     sel("temp", temp, [["", "Any temperature"], ["HotWarm", "Hot + Warm"], ["Hot", "Hot"], ["Warm", "Warm"]]),
-    sel("sort", sort, [["urgency", "Sort: urgency"], ["due", "Sort: due date"]]));
+    sel("ev", ev, [["", "All events"], ...[...evs.entries()]]));
 
-  const dueText = (i: any) => {
-    if (i.section === "overdue") return h("span", { class: "wdue od" }, `${i.overdueBusinessDays} bd overdue`);
-    if (i.section === "respond") return h("span", { class: "wdue od" }, `replied ${fmt.day(i.replyAt)}`);
-    if (i.section === "today") return h("span", { class: "wdue td" }, "due today");
-    if (i.due) return h("span", { class: "wdue" }, `due ${fmt.day(i.due)}`);
-    return h("span", { class: "wdue faint" }, "no due date");
-  };
-
+  // ---- one compact row per contact
   const row = (i: any) => {
-    const el = h("div", { class: `wrow s-${i.section}` });
-    const more = h("div", { class: "wmore" });
-    let open = false;
-    const toggle = () => {
-      open = !open; el.classList.toggle("open", open);
-      if (open && !more.childElementCount) more.append(
-        h("div", null, h("b", null, "Why: "), i.why, i.dueSource ? h("span", { class: "faint" }, ` · due date from ${({ reply: "reply date + 1 business day", task: "HubSpot task", sla: `${i.temperature ?? "Warm"} first-touch SLA from eligibility`, cadence: "follow-up cadence from last touch" } as any)[i.dueSource]}`) : null),
-        h("div", null, h("b", null, "Event: "), i.events.map((e: any) => `${e.name} (${fmt.day(e.date)})`).join(" · ")),
-        h("div", null, h("b", null, "Engagement: "), i.engagement ?? "No verified reply or meeting", " · ", i.attendance === "attended" ? "attended" : i.attendance === "no_show" ? "did not attend" : "attendance not recorded",
-          i.eventCategory === "sponsored" && i.attendance === "attended" && !i.engagement ? h("span", { class: "faint" }, " (sponsored-event attendance alone is not verified engagement)") : null),
-        h("div", null, h("b", null, "SDR: "), i.sdrName ?? "–", i.sdrSource === "pod_ae" ? h("span", { class: "faint" }, " (via AE pod)") : null,
-          i.otherSdrTouches ? h("span", { class: "faint" }, ` · ${i.otherSdrTouches} touch(es) by a previous/other SDR, not credited`) : null),
-        h("div", { class: "wcontacts" }, (() => { const box = h("div", { class: "faint" }, "Loading contacts…");
-          api("leads", { ...filterParams(f), bucket: "eligible", search: i.companyName ?? "", limit: "300" }).then((r: any) => {
-            const rows = r.rows.filter((x: any) => (x.companyId ?? `contact:${x.contactId}`) === i.key);
-            box.replaceWith(rows.length ? leadTable(rows, { group: true }) : h("div", { class: "faint" }, "No contact records in the current filters"));
-          }).catch(() => { box.textContent = "Could not load contacts"; });
-          return box; })()),
-        h("div", { class: "wlinks" },
-          h("span", { class: "link", onclick: () => openLead(i.eventId, i.contactId) }, "Full history (activity, deals, ownership) →"),
-          i.contacts > 1 ? h("span", { class: "faint" }, ` · ${i.contacts} contacts on this account${i.otherActions ? `, ${i.otherActions} with their own action` : ""}`) : null));
+    const last = i.lastOutboundAt ? `${fmt.day(i.lastOutboundAt)} · ${who(i.lastBy) ?? "owner not recorded"}` : "Not contacted yet";
+    const earlier = !i.yourTouches && i.otherSdrTouches ? `earlier: ${i.otherSdrTouches} by ${i.otherBy?.name ?? "another SDR"}` : null;
+    return h("div", { class: `crow2 c-${i.color}`, tabindex: "0", onclick: () => details(i), onkeydown: (e: KeyboardEvent) => { if (e.key === "Enter") details(i); } },
+      h("span", { class: "cdot2" }),
+      h("div", { class: "cwho" },
+        h("div", { class: "cl1" }, h("b", null, i.companyName ?? "(no company)"), " · ", i.contactName),
+        h("div", { class: "cl2" }, i.jobTitle ?? "")),
+      h("div", { class: "cdo" },
+        h("div", { class: "cact" }, i.action),
+        h("div", { class: "cwhy" }, i.reason)),
+      h("div", { class: "cmeta2" },
+        h("div", null, !f.sdr ? `${i.sdrName ?? "No SDR"} · ` : "", h("span", { title: "Current SDR's qualifying touches since the event" }, `${i.yourTouches} your touch${i.yourTouches === 1 ? "" : "es"}`)),
+        h("div", { class: "faint", title: "Last outbound contact by anyone (SDR, AE or other)" }, `Last: ${last}`),
+        earlier ? h("div", { class: "faint" }, earlier) : null),
+      h("div", { class: "ctags" }, tempPill(i.temperature), i.deal ? h("span", { class: "sbadge", title: i.deal.via === "contact" ? "Deal associated with this contact" : "Deal on the company; this contact may not be involved" }, i.deal.via === "contact" ? "Deal with contact" : "Open deal on company") : null));
+  };
+
+  const section = (g: any) => {
+    const list = base.filter((i) => i.group === g.key);
+    const wrap = h("div", { class: "wlist" });
+    let shown = 0;
+    const more = h("button", { class: "btn more" }, "Show more");
+    const add = () => {
+      wrap.append(...list.slice(shown, shown + PAGE).map(row));
+      shown = Math.min(list.length, shown + PAGE);
+      more.textContent = `Show more (${list.length - shown} left)`;
+      more.style.display = shown < list.length ? "" : "none";
     };
-    el.append(
-      h("div", { class: "wmain", onclick: toggle },
-        h("span", { class: "wdot" }),
-        h("div", { class: "wco" },
-          h("div", { class: "wl1" }, h("b", null, i.companyName ?? "(no company)"), hsLink("company", i.companyId), tempPill(i.temperature),
-            i.engagement ? h("span", { class: "wtag eng" }, i.engagement) : null),
-          h("div", { class: "wl2" }, h("span", { class: `abadge ${i.status?.color ?? "grey"}` }, i.status?.label ?? i.action), h("span", { class: "wwhy" }, i.status?.next ?? i.why),
-            (i.status?.secondary ?? []).map((x: string) => h("span", { class: "sbadge" }, x)))),
-        h("div", { class: "wct" },
-          h("div", null, i.contactName, " ", hsLink("contact", i.contactId)),
-          h("div", { class: "faint" }, (i.jobTitle ?? "").slice(0, 40))),
-        h("div", { class: "wsd" },
-          !f.sdr ? h("div", null, i.sdrName ?? "–") : null,
-          h("div", { class: "faint" }, `${i.currentSdrTouches ?? "–"} touch${i.currentSdrTouches === 1 ? "" : "es"} by SDR`)),
-        h("div", { class: "wlast" },
-          dueText(i),
-          h("div", { class: "faint", title: "Last qualifying outbound contact on this contact, by anyone" }, `Last: ${lastContactText(i.lastContact)}`))),
-      more);
-    return el;
+    more.addEventListener("click", (e) => { e.stopPropagation(); add(); });
+    if (list.length) add();
+    return h("div", { class: "wsec" },
+      h("div", { class: "wsh" }, h("span", { class: "wst" }, g.label), h("span", { class: "wsn" }, fmt.n(list.length)), h("span", { class: "faint wsh-h" }, g.hint)),
+      list.length ? [wrap, more] : h("div", { class: "wempty" }, g.key === "respond" ? "No replies or HubSpot tasks due. Nice." : "Nothing here."));
   };
 
-  const section = (s: any) => {
-    const list = items.filter((i) => i.section === s.key);
-    const collapsed = !PRIMARY.has(s.key) && only !== s.key && x.get(`open_${s.key}`) !== "1";
-    const cap = 150;
-    return h("div", { class: `wsec ${collapsed ? "closed" : ""}` },
-      h("div", { class: "wsh", onclick: () => !PRIMARY.has(s.key) && go({ [`open_${s.key}`]: collapsed ? "1" : "" }) },
-        !PRIMARY.has(s.key) ? h("span", { class: "chev" }, collapsed ? "▸" : "▾") : null,
-        h("span", { class: "wst" }, s.label), h("span", { class: "wsn" }, fmt.n(list.length)), h("span", { class: "faint wsh-h" }, s.hint)),
-      collapsed ? null : list.length ? h("div", { class: "wlist" }, list.slice(0, cap).map(row),
-        list.length > cap ? h("div", { class: "faint", style: "padding:8px 12px" }, `Showing ${cap} of ${list.length}. Use search or filters to narrow.`) : null)
-        : h("div", { class: "wempty" }, "Nothing here."));
-  };
-
-  const sections = (w.sections as any[]).filter((s) => !only || s.key === only);
+  const shownGroups = grp ? groups.filter((g) => g.key === grp) : groups.filter((g) => ACTION_GROUPS.includes(g.key));
+  const done = base.filter((i) => i.yourTouches > 0).length;
   return h("div", { class: "wpage" },
-    h("div", { class: "dlive" }, h("span", { class: "dot" }), `Live from HubSpot · synced ${fmt.ago(meta?.freshness?.lastSuccessAt)} · ${fmt.n(w.total)} event accounts · today ${fmt.day(today)}`),
-    blocks, controls,
-    only ? h("div", { class: "faint", style: "margin:4px 0 8px" }, "Filtered to one section · ", h("span", { class: "link", onclick: () => go({ sec: "" }) }, "show all")) : null,
-    sections.map(section),
-    h("div", { class: "faint", style: "margin-top:12px;font-size:12px" }, "Timeliness reporting (reached on time, late, not reached) is in CMO overview → SDR scorecard. Actions complete when the touch is logged in HubSpot and the next sync runs."));
+    h("div", { class: "dlive" }, h("span", { class: "dot" }), `Live from HubSpot · synced ${fmt.ago(meta?.freshness?.lastSuccessAt)} · ${fmt.n(base.length)} contacts · `,
+      h("b", null, `${fmt.n(done)} already contacted by their SDR`)),
+    tabs, controls,
+    grp ? h("div", { class: "faint", style: "margin:4px 0 8px" }, "Showing one group · ", h("span", { class: "link", onclick: () => go({ g: "" }) }, "show today's work")) : null,
+    shownGroups.map(section),
+    !grp ? h("div", { class: "faint", style: "margin-top:10px;font-size:12px" }, `${fmt.n(count("progress"))} contacts are in progress or need no action now. `, h("span", { class: "link", onclick: () => go({ g: "progress" }) }, "View them")) : null);
+}
+
+/** Right-side drawer: next action first, then contact, outreach history, ownership, events, commercial context. */
+async function details(i: any) {
+  const box = h("div", { class: "cdrawer" });
+  openCustom(i.contactName, `${i.companyName ?? ""}${i.jobTitle ? ` · ${i.jobTitle}` : ""}`, box);
+  const kv = (k: string, v: any) => (v === null || v === undefined || v === "" ? null : [h("div", { class: "k" }, k), h("div", null, v)]);
+  const sec = (t: string, ...c: any[]) => h("div", { class: "dsec2" }, h("div", { class: "dt" }, t), ...c);
+  box.append(
+    h("div", { class: `nextbox c-${i.color}` }, h("div", { class: "na" }, i.action), h("div", { class: "nr" }, i.reason), i.due ? h("div", { class: "faint" }, `Due ${fmt.day(i.due)}`) : null),
+    sec("Contact", h("div", { class: "kv tight" },
+      kv("Contact", [i.contactName, " ", hsLink("contact", i.contactId, "Open in HubSpot ↗")]),
+      kv("Company", [i.companyName ?? "–", " ", hsLink("company", i.companyId, "Open in HubSpot ↗")]),
+      kv("Email", i.contactEmail), kv("Temperature", tempPill(i.temperature)))),
+    sec("Outreach", h("div", { class: "kv tight" },
+      kv("Your touches", `${i.yourTouches} by ${i.sdrName ?? "the current SDR"} since the event`),
+      kv("Last contacted", i.lastOutboundAt ? `${fmt.day(i.lastOutboundAt)} · ${who(i.lastBy) ?? "owner not recorded"}` : "Not contacted yet"),
+      kv("Other SDR outreach", i.otherSdrTouches ? `${i.otherSdrTouches} touch${i.otherSdrTouches === 1 ? "" : "es"}${i.lastOtherSdrTouch ? `, last ${fmt.day(i.lastOtherSdrTouch.at)} by ${who(i.otherBy) ?? "another SDR"}` : ""} (not credited to ${i.sdrName ?? "the current SDR"})` : null)),
+      h("div", { class: "histbox" }, h("div", { class: "faint" }, "Loading activity…"))),
+    sec("Ownership", h("div", { class: "kv tight" },
+      kv("Current SDR", `${i.sdrName ?? "Not assigned"}${i.sdrSource === "pod_ae" ? " (via the company's AE pod)" : ""}`),
+      kv("Allocated", i.allocationDate ? fmt.day(i.allocationDate) : "Allocation date not recorded"))),
+    sec(i.events.length > 1 ? `Events (${i.events.length})` : "Event", h("div", null, i.events.map((e: any) =>
+      h("div", { class: "evline" }, h("span", { class: "link", onclick: () => openLead(e.id, i.contactId) }, e.name), h("span", { class: "faint" }, ` · ${fmt.day(e.date)} · ${e.attendance === "attended" ? "attended" : e.attendance === "no_show" ? "no-show" : "attendance not recorded"}`))))),
+    sec("Commercial", i.deal ? h("div", { class: "kv tight" },
+      kv("Open deal", [i.deal.name ?? `Deal ${i.deal.id}`, " ", hsLink("deal", i.deal.id, "↗")]),
+      kv("Stage", i.deal.stage), kv("Deal owner", who(i.dealOwner) ?? "Not available"),
+      kv("Linked to", i.deal.via === "contact" ? "This contact" : "The company only: this contact may not be involved")) : h("div", { class: "faint" }, "No open deal")));
+  // Outreach history from the stored activities (same source as the lead audit). Most useful first; full list collapsed.
+  try {
+    const r = await api(`leads/${i.eventId}/${i.contactId}`);
+    const acts: any[] = (r.activities ?? []).filter((a: any) => a.via === "contact");
+    const line = (a: any) => h("div", { class: "actline" }, h("span", null, fmt.day(a.timestamp)), h("span", null, `${a.kind.toLowerCase().replace("_", " ")}`), h("span", null, a.ownerName ?? "–"),
+      h("span", { class: a.counted ? "ok-t" : "faint" }, a.counted ? "SDR touch" : a.why));
+    const hist = box.querySelector(".histbox")!;
+    hist.replaceChildren(acts.length ? h("div", null, acts.slice(0, 5).map(line),
+      acts.length > 5 ? h("details", null, h("summary", { class: "link" }, `Full history (${acts.length})`), acts.slice(5).map(line)) : null) : h("div", { class: "faint" }, "No activity logged on this contact"));
+    if (r.enriched?.deals?.length) box.append(sec("All deals", dealTable(r.enriched.deals)));
+  } catch { box.querySelector(".histbox")!.replaceChildren(h("div", { class: "faint" }, "Activity history unavailable")); }
 }

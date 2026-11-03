@@ -221,8 +221,9 @@ export interface LeadFact {
   lastOutboundAt?: string | null;       // latest outbound email/call/meeting by anyone (SDR, AE, other)
   lastOutboundOwnerId?: string | null;
   lastMeetingAt?: string | null;
-  currentSdrTouches?: number | null;    // touches by the CURRENT SDR since allocation (previous SDRs not credited)
-  otherSdrTouches?: number;             // touches by other roster SDRs (context for reassigned accounts)
+  currentSdrTouches?: number | null;    // touches by the CURRENT SDR since the event date (other reps not credited)
+  otherSdrTouches?: number;             // qualifying touches by OTHER roster SDRs since the event (context, never credited)
+  lastOtherSdrTouch?: { at: string; ownerId: string | null } | null;
   lastTouchOwnerId?: string | null;
   currentSdrLastTouchAt?: string | null; // last qualifying touch by the CURRENT SDR (any date)
   nextTaskSubject?: string | null;

@@ -38,6 +38,12 @@ export function mapTemperature(raw: string | null, rules: Rules): Temperature | 
 }
 
 /** Expected cumulative touches at a given lead age, linear between the configured checkpoints (rounded down). */
+/** A prospect reply: an incoming email that is not an auto-reply, out-of-office or bounce. */
+const AUTO_REPLY = /^\s*(automatic reply|auto[- ]?reply|autoreply|auto:|out of (the )?office|ooo\b|undeliverable|delivery status notification|mail delivery (failed|subsystem)|returned mail)/i;
+export function isRealReply(a: Activity): boolean {
+  return a.kind === "INCOMING_EMAIL" && !AUTO_REPLY.test(a.title ?? "");
+}
+
 export function expectedTouches(ageDays: number, rule: CadenceRule): number {
   const pts = [...rule.cadence].sort((a, b) => a.day - b.day);
   if (!pts.length) return 1;
@@ -134,7 +140,7 @@ export function computeLeadFact(
 
   // ---- prior conversation (before the event): meeting, prospect reply, or deal that already existed
   const priorConversation = !!ev.date && (
-    contactActs.some((a) => (a.kind === "MEETING" || a.kind === "INCOMING_EMAIL") && toDate(a.timestamp)! < ev.date! && daysBetween(toDate(a.timestamp)!, ev.date!) <= 365) ||
+    contactActs.some((a) => (a.kind === "MEETING" || isRealReply(a)) && toDate(a.timestamp)! < ev.date! && daysBetween(toDate(a.timestamp)!, ev.date!) <= 365) ||
     deals.some((d) => d.createdAt && toDate(d.createdAt)! < ev.date!)
   );
 
@@ -196,7 +202,7 @@ export function computeLeadFact(
   if (eligibilityDate) {
     const openDeal = deals.find((d) => !d.isClosed && !rules.inactiveDealStages.some((x) => (d.stageLabel ?? "").toLowerCase().includes(x.toLowerCase())));
     const meeting = contactActs.find((a) => a.kind === "MEETING" && toDate(a.timestamp)! >= eligibilityDate);
-    const reply = contactActs.find((a) => a.kind === "INCOMING_EMAIL" && toDate(a.timestamp)! >= eligibilityDate);
+    const reply = contactActs.find((a) => isRealReply(a) && toDate(a.timestamp)! >= eligibilityDate);
     if (openDeal) inPlayReason = `Open opportunity: ${openDeal.name ?? openDeal.id}${openDeal.stageLabel ? ` (${openDeal.stageLabel})` : ""}`;
     else if (meeting) inPlayReason = `Meeting on ${toDate(meeting.timestamp)}`;
     else if (reply) inPlayReason = `Prospect replied on ${toDate(reply.timestamp)}`;
@@ -230,16 +236,20 @@ export function computeLeadFact(
 
   // ---- daily-worklist facts (context only: they do not change status, SLA or any reported metric)
   const maxTs = (xs: Activity[]) => xs.map((a) => a.timestamp).sort().pop() ?? null;
-  const lastReplyAt = eligibilityDate ? maxTs(contactActs.filter((a) => a.kind === "INCOMING_EMAIL" && toDate(a.timestamp)! >= eligibilityDate)) : null;
+  const lastReplyAt = eligibilityDate ? maxTs(contactActs.filter((a) => isRealReply(a) && toDate(a.timestamp)! >= eligibilityDate)) : null;
   // Any outbound response by anyone (SDR, AE or other), so a reply already answered by an AE is not shown as waiting.
   const outbound = contactActs.filter((a) => (a.kind === "EMAIL" && (a.direction || "EMAIL").toUpperCase() === "EMAIL") ||
     (a.kind === "CALL" && (a.direction || "").toUpperCase() !== "INBOUND") || a.kind === "MEETING");
   outbound.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
   const lastOutbound = outbound[outbound.length - 1] ?? null;
   const lastMeetingAt = maxTs(contactActs.filter((a) => a.kind === "MEETING" && toDate(a.timestamp)! <= today));
-  const sdrFrom = allocationDate ?? eligibilityDate;
+  // "Your touches": the current SDR's own qualifying touches since the event date (same window as the touch count,
+  // which also credits the current SDR's work done before a later allocation date). Other reps are never credited.
+  const sdrFrom = ev.date ?? eligibilityDate;
   const currentSdrTouches = sdr && sdrFrom ? touches.filter((t) => t.ownerId === sdr && day(t) >= sdrFrom).length : null;
-  const otherSdrTouches = touches.filter((t) => t.ownerId !== sdr).length;
+  const others = touches.filter((t) => t.ownerId !== sdr && (!ev.date || day(t) >= ev.date));
+  const otherSdrTouches = others.length;
+  const lastOtherSdrTouch = others.length ? { at: others[others.length - 1]!.timestamp, ownerId: others[others.length - 1]!.ownerId } : null;
   const lastTouchOwnerId = sinceElig.length ? sinceElig[sinceElig.length - 1]!.ownerId : null;
   const mine = sdr ? touches.filter((t) => t.ownerId === sdr) : [];
   const currentSdrLastTouchAt = mine.length ? mine[mine.length - 1]!.timestamp : null;
@@ -321,7 +331,7 @@ export function computeLeadFact(
     daysSinceLastTouch: lastTouchAt ? daysBetween(toDate(lastTouchAt)!, today) : null,
     businessDaysToFirstTouch: bizToFirst, businessDaysSinceEligibility: bizSinceElig,
     lastReplyAt, lastOutboundAt: lastOutbound?.timestamp ?? null, lastOutboundOwnerId: lastOutbound?.ownerId ?? null, lastMeetingAt,
-    currentSdrTouches, otherSdrTouches, lastTouchOwnerId, currentSdrLastTouchAt,
+    currentSdrTouches, otherSdrTouches, lastOtherSdrTouch, lastTouchOwnerId, currentSdrLastTouchAt,
     nextTaskSubject: nextTask?.subject ?? null, nextTaskOwnerId: nextTask?.ownerId ?? null, slaApplies: !noSla,
     firstTouchSlaMet: noSla ? null : slaMet, firstTouchOverdue: noSla ? false : overdue, expectedTouches: expected,
     insufficientFollowUp: insufficient, multiWeek: weeks.size >= rules.multiWeekMinWeeks,

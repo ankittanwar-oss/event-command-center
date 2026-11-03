@@ -1,6 +1,6 @@
 import {
   accountQueue, applyFilters, BUCKETS, categoryBreakdown, CATEGORY_LABEL, dataQuality, eventSummaries, fiscalQuarterOf, inBucket, nextAction,
-  normalizeFilters, parseQuarterKey, worklist, leadDimensions, ACTION_HEALTH_LABEL, outreachTimeliness, inactivity, overdueSource, deadlineState, leadWork, contactLevelInPlay, actionStatus, DEFAULT_RULES, dealOrder, type DealRef, depthStats, sdrDepth, accountDepth, WINDOW_LABEL, BANDS, type TouchWindow, findings, narrative, RISK_LABEL, riskCounts, riskOf, sdrRisk, previousQuarter, qoq, quarterMetrics, regionBreakdown, rosterById, SDR_ROSTER, sdrTable, STATUS_LABEL, temperatureSummary,
+  normalizeFilters, parseQuarterKey, worklist, leadDimensions, ACTION_HEALTH_LABEL, outreachTimeliness, inactivity, overdueSource, deadlineState, leadWork, contactLevelInPlay, actionStatus, contactWorklist, DEFAULT_RULES, dealOrder, type DealRef, depthStats, sdrDepth, accountDepth, WINDOW_LABEL, BANDS, type TouchWindow, findings, narrative, RISK_LABEL, riskCounts, riskOf, sdrRisk, previousQuarter, qoq, quarterMetrics, regionBreakdown, rosterById, SDR_ROSTER, sdrTable, STATUS_LABEL, temperatureSummary,
   type EventCategory, type Filters, type LeadFact, type NormalizedFilters, type Region, type Rules,
 } from "@ecc/core";
 
@@ -444,7 +444,10 @@ export function daily(facts: LeadFact[], q: URLSearchParams, today: string, rule
   const bySdr = sdrTable(rows, nf).map((s) => ({ ownerId: s.ownerId, name: s.name, region: s.region, ...summarise(accts.filter((a) => a.sdrOwnerId === s.ownerId)) }));
   // Action worklist (primary SDR view). The timeliness summary above stays in the response for reporting.
   const work = worklist(rows, today, rules);
-  return { filters: nf, groups: DAILY_GROUPS, summary: summarise(accts), bySdr, accounts: accts.slice(0, 1500), total: accts.length,
+  const cw = contactWorklist(rows, today, rules);
+  const contacts = { groups: cw.groups, counts: cw.counts, total: cw.items.length,
+    items: cw.items.slice(0, 3000).map((i) => ({ ...i, lastBy: ownerLabel(i.lastOutboundOwnerId, rules), otherBy: ownerLabel(i.lastOtherSdrTouch?.ownerId ?? null, rules), dealOwner: ownerLabel(i.deal?.ownerId ?? null, rules) })) };
+  return { contacts, filters: nf, groups: DAILY_GROUPS, summary: summarise(accts), bySdr, accounts: accts.slice(0, 1500), total: accts.length,
     today, work: { sections: work.sections, counts: work.counts, total: work.items.length,
       items: work.items.slice(0, 2000).map((i) => ({ ...i, lastContact: { at: i.lastOutboundAt, by: ownerLabel(i.lastOutboundOwnerId, rules), sdrAt: i.currentSdrLastTouchAt, sdr: ownerLabel(i.sdrOwnerId, rules) } })) } };
 }
