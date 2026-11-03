@@ -54,7 +54,6 @@ function filterBar(route: Route): HTMLElement {
     sel("region", [["", "All regions"], ["NAM", "NAM"], ["EMEA", "EMEA"], ["APAC", "APAC"]], "Region"),
     sel("sdr", [["", f.region ? `All ${f.region} SDRs` : "All SDRs"], ...roster.map((s: any) => [s.ownerId, s.name] as [string, string])], "SDR"),
     sel("category", [["", "All categories"], ["owned", "Owned"], ["sponsored", "Sponsored"], ["webinar", "Webinars"], ["roundtable", "Roundtables"]], "Category"),
-    sel("temperature", [["", "Hot + Warm"], ["Hot", "Hot"], ["Warm", "Warm"]], "Temperature"),
     sel("eventId", [["", "All events"], ...meta.events.slice(0, 300).map((e: any) => [e.id, `${(e.name ?? "").slice(0, 40)} · ${fmt.day(e.date)}`] as [string, string])], "Event"),
     search,
     h("button", { class: "reset", onclick: () => { location.hash = buildHash(route.view, { quarter: "this" }); } }, "Reset"),

@@ -1,77 +1,66 @@
 import { api } from "../api.js";
 import { leadTable } from "../drawer.js";
 import { buildHash, filterParams, type Route } from "../state.js";
-import { dealPill, fmt, h, hsLink, table, tempPill } from "../ui.js";
+import { fmt, h, hsLink, table, tempPill } from "../ui.js";
 
-// Daily Command Centre: are SDRs working every event account in a timely manner? Live from the synced data.
+// Daily Command Centre: is every event account being worked on time? Three colours, minimal text.
+//   green = reached out on time · amber = awaiting outreach / late / gone quiet · red = not reached out (SLA missed)
+const COLORS = [
+  { key: "red", label: "Not reached out", hint: "No SDR touch and the first-touch SLA has passed, or a prospect reply is waiting" },
+  { key: "amber", label: "Awaiting outreach", hint: "First touch still inside the SLA, or reached out late, or gone quiet" },
+  { key: "green", label: "Reached out on time", hint: "First SDR touch within the SLA and still being worked" },
+] as const;
+
 export async function dailyView(route: Route, meta: any): Promise<HTMLElement> {
   const f = route.filters;
-  const grp = route.extra.get("group") ?? "";
+  const col = route.extra.get("color") ?? "";
   const d = await api("daily", filterParams(f));
   const s = d.summary;
-  const sdrName = f.sdr ? d.bySdr.find((x: any) => x.ownerId === f.sdr)?.name : null;
   const go = (patch: Record<string, string>) => { location.hash = buildHash("daily", f, { ...Object.fromEntries(route.extra), ...patch }); };
+  const pct = (n: number) => (s.accounts ? `${Math.round((n / s.accounts) * 100)}%` : "–");
 
-  const tile = (key: string) => {
-    const g = d.groups.find((x: any) => x.key === key);
-    return h("button", { class: `htile ${g.cls} ${grp === key ? "sel" : ""}`, onclick: () => go({ group: grp === key ? "" : key }), title: g.hint },
-      h("span", { class: "hl" }, g.label), h("span", { class: "hv" }, fmt.n(s.groups[key] ?? 0)), h("span", { class: "hp" }, "accounts"), h("span", { class: "hh" }, g.hint));
-  };
-  const stat = (v: any, l: string, hint?: string) => h("div", { class: "dstat", title: hint }, h("b", null, v), h("span", null, l));
+  const tiles = h("div", { class: "ctiles" }, COLORS.map((c) =>
+    h("button", { class: `ctile ${c.key} ${col === c.key ? "sel" : ""}`, title: c.hint, onclick: () => go({ color: col === c.key ? "" : c.key }) },
+      h("span", { class: "cv" }, fmt.n(s[c.key])), h("span", { class: "cl" }, c.label), h("span", { class: "cp" }, `${pct(s[c.key])} of ${fmt.n(s.accounts)} accounts`))));
 
-  const scoreboard = !f.sdr ? h("div", null,
-    h("h2", null, "By SDR", h("span", { class: "sub" }, "Click a name to see that SDR's accounts")),
-    h("div", { class: "card" }, table<any>([
-      { key: "name", label: "SDR", render: (r) => [h("span", { class: "link", onclick: () => { location.hash = buildHash("daily", { ...f, sdr: r.ownerId, region: "" }); } }, r.name), h("span", { class: "faint" }, ` ${r.region}`)] },
-      { key: "accounts", label: "Event accounts", num: true },
-      { key: "worked", label: "Worked", num: true, render: (r) => `${r.worked} (${r.accounts ? Math.round((r.worked / r.accounts) * 100) : 0}%)` },
-      { key: "withinSlaPct", label: "First touch within SLA", num: true, render: (r) => fmt.pct(r.withinSlaPct) },
-      { key: "medianDaysToFirst", label: "Median days to 1st touch", num: true, render: (r) => r.medianDaysToFirst ?? "–" },
-      { key: "touchedLast7", label: "Touched last 7 days", num: true },
-      { key: "respond", label: "Respond now", num: true, sort: (r) => r.groups.respond, render: (r) => r.groups.respond ? h("span", { class: "crit-t strong" }, String(r.groups.respond)) : h("span", { class: "faint" }, "0") },
-      { key: "overdue", label: "Overdue", num: true, sort: (r) => r.groups.overdue, render: (r) => r.groups.overdue ? h("span", { class: "crit-t strong" }, String(r.groups.overdue)) : h("span", { class: "faint" }, "0") },
-      { key: "stalled", label: "Stalled", num: true, sort: (r) => r.groups.stalled, render: (r) => r.groups.stalled ? h("span", { class: "crit-t" }, String(r.groups.stalled)) : h("span", { class: "faint" }, "0") },
-      { key: "due", label: "Due now", num: true, sort: (r) => r.groups.due, render: (r) => r.groups.due ? h("span", { class: "warnr-t" }, String(r.groups.due)) : h("span", { class: "faint" }, "0") },
-    ], d.bySdr, { initialSort: "overdue", rowClass: (r) => (r.groups.respond || r.groups.overdue ? "row-crit" : "") }))) : null;
+  const bar = h("div", { class: "cbar3" }, COLORS.map((c) => s[c.key] ? h("span", { class: c.key, style: `flex:${s[c.key]}`, title: `${c.label}: ${s[c.key]}` }) : null));
 
-  const list = d.accounts.filter((a: any) => !grp || a.group === grp);
-  const groupsShown = d.groups.filter((g: any) => list.some((a: any) => a.group === g.key));
-  const acctRow = (a: any) => {
-    const el = h("div", { class: `drow ${d.groups.find((g: any) => g.key === a.group).cls}` });
+  const scoreboard = !f.sdr ? h("div", { class: "card", style: "margin-top:14px" }, table<any>([
+    { key: "name", label: "SDR", render: (r) => h("span", { class: "link", onclick: () => { location.hash = buildHash("daily", { ...f, sdr: r.ownerId, region: "" }); } }, r.name) },
+    { key: "accounts", label: "Accounts", num: true },
+    { key: "red", label: "Not reached out", num: true, render: (r) => r.red ? h("span", { class: "crit-t strong" }, String(r.red)) : h("span", { class: "faint" }, "0") },
+    { key: "amber", label: "Awaiting", num: true, render: (r) => r.amber ? h("span", { class: "warnr-t strong" }, String(r.amber)) : h("span", { class: "faint" }, "0") },
+    { key: "green", label: "On time", num: true, render: (r) => r.green ? h("span", { class: "ok-t strong" }, String(r.green)) : h("span", { class: "faint" }, "0") },
+    { key: "mix", label: "", sort: (r) => (r.accounts ? r.red / r.accounts : 0), render: (r) => h("div", { class: "cbar3 mini" },
+      ["red", "amber", "green"].map((k) => r[k] ? h("span", { class: k, style: `flex:${r[k]}` }) : null)) },
+  ], d.bySdr, { initialSort: "red", rowClass: (r) => (r.red ? "row-crit" : "") })) : null;
+
+  const list = d.accounts.filter((a: any) => !col || a.color === col);
+  const row = (a: any) => {
+    const el = h("div", { class: `crow ${a.color}` });
     const body = h("div", { class: "dcontacts" });
     let loaded = false;
-    const sla = a.firstTouch ? `${a.businessDaysToFirstTouch ?? "–"} bd to 1st${a.firstTouchWithinSla === false ? " · SLA missed" : ""}` : a.firstTouchWithinSla === false ? "Never touched · SLA missed" : "Not touched yet";
+    const first = a.firstTouch ? `1st touch day ${a.businessDaysToFirstTouch ?? "–"}` : "No touch yet";
     el.append(
-      h("div", { class: "dmain", onclick: () => { el.classList.toggle("open"); if (!loaded) { loaded = true; body.replaceChildren(leadTable(a.contacts)); } } },
-        h("div", { class: "dacct" }, h("b", null, a.companyName ?? "(no company)"), hsLink("company", a.companyId), " ", tempPill(a.temperature),
-          h("div", { class: "faint small" }, [a.icpTier, a.sdrName, a.events.length === 1 ? `${a.events[0].name}` : `${a.events.length} events`].filter(Boolean).join(" · "))),
-        h("div", { class: "dnext" }, h("b", null, a.nextAction), a.lastReply ? h("div", { class: "crit-t small" }, `Replied ${fmt.day(a.lastReply)}`) : null),
-        h("div", { class: "dwhen" }, h("div", { class: a.firstTouchWithinSla === false ? "crit-t" : "" }, sla), h("div", { class: "faint small" }, `Eligible ${fmt.day(a.eligibleSince)}`)),
-        h("div", { class: "dlast" }, a.lastTouch ? [h("div", null, fmt.day(a.lastTouch)), h("div", { class: "faint small" }, `${a.daysSinceLast}d ago`)] : h("span", { class: "faint" }, "Never")),
-        h("div", { class: "dtouch" }, h("b", null, String(a.touches)), h("div", { class: "faint small" }, `${a.contactsWorked}/${a.eligibleContacts} contacts`)),
-        h("div", { class: "ddeal" }, a.dealStatus && a.dealStatus !== "none" ? dealPill(a.dealStatus) : null)),
+      h("div", { class: "cmain", onclick: () => { el.classList.toggle("open"); if (!loaded) { loaded = true; body.replaceChildren(leadTable(a.contacts)); } } },
+        h("span", { class: "cdot" }),
+        h("span", { class: "cname" }, h("b", null, a.companyName ?? "(no company)"), hsLink("company", a.companyId)),
+        tempPill(a.temperature),
+        !f.sdr ? h("span", { class: "csdr" }, a.sdrName ?? "–") : null,
+        h("span", { class: `cstate ${a.color}` }, a.colorLabel),
+        h("span", { class: "cmeta" }, first),
+        h("span", { class: "cmeta" }, a.lastTouch ? `last ${a.daysSinceLast}d ago` : ""),
+        h("span", { class: "cmeta" }, a.dealStatus === "open" ? "open opp" : "")),
       body);
     return el;
   };
 
   return h("div", null,
-    h("div", { class: "dlive" }, h("span", { class: "dot" }), `Live from HubSpot · last sync ${fmt.ago(meta?.freshness?.lastSuccessAt)} · refreshes every 2 hours automatically`),
-    h("h2", { style: "margin-top:4px" }, sdrName ? `${sdrName}: event accounts` : "All SDRs: event accounts", h("span", { class: "sub" }, `${d.filters.quarterLabel} · eligible Hot and Warm event accounts`)),
-    h("div", { class: "htiles" }, ["respond", "overdue", "stalled", "due"].map(tile)),
-    h("div", { class: "dstats card" },
-      stat(fmt.n(s.accounts), "event accounts", `${s.hot} Hot`),
-      stat(`${fmt.n(s.worked)} (${s.accounts ? Math.round((s.worked / s.accounts) * 100) : 0}%)`, "worked at least once"),
-      stat(fmt.pct(s.withinSlaPct), "first touch within SLA"),
-      stat(s.medianDaysToFirst ?? "–", "median business days to 1st touch"),
-      stat(fmt.n(s.touchedLast7), "touched in the last 7 days"),
-      stat(fmt.n(s.groups.ontrack), "on track"), stat(fmt.n(s.groups.inplay), "in play"), stat(fmt.n(s.groups.notdue), "not yet due")),
+    h("div", { class: "dlive" }, h("span", { class: "dot" }), `Live from HubSpot · synced ${fmt.ago(meta?.freshness?.lastSuccessAt)} · updates every 2 hours`),
+    tiles, bar,
     scoreboard,
-    h("h2", null, "Work queue", h("span", { class: "sub" }, `${fmt.n(list.length)} accounts${grp ? ` · ${d.groups.find((g: any) => g.key === grp).label}` : ""} · most urgent first · click an account for its contacts`),
-      grp ? h("span", { class: "link", style: "font-size:12px;cursor:pointer", onclick: () => go({ group: "" }) }, "Show all") : null),
-    h("div", { class: "dhead-row" }, h("span", null, "Account"), h("span", null, "Next action"), h("span", null, "First touch"), h("span", null, "Last touch"), h("span", null, "Touches"), h("span")),
-    list.length ? groupsShown.map((g: any) => [
-      h("div", { class: `dgroup ${g.cls}` }, h("b", null, g.label), h("span", { class: "faint" }, ` ${list.filter((a: any) => a.group === g.key).length} · ${g.hint}`)),
-      h("div", { class: "card" }, list.filter((a: any) => a.group === g.key).slice(0, 300).map(acctRow)),
-    ]) : h("div", { class: "empty" }, "No event accounts match the filters."),
+    h("h2", null, col ? COLORS.find((c) => c.key === col)!.label : "All event accounts", h("span", { class: "sub" }, `${fmt.n(list.length)} · red first · click for contacts`),
+      col ? h("span", { class: "link", style: "font-size:12px;cursor:pointer", onclick: () => go({ color: "" }) }, "Show all") : null),
+    list.length ? h("div", { class: "card" }, list.slice(0, 600).map(row)) : h("div", { class: "empty" }, "No event accounts match the filters."),
   );
 }

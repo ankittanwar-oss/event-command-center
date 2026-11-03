@@ -309,6 +309,15 @@ export function daily(facts: LeadFact[], q: URLSearchParams, today: string, rule
     else if (leads.some((l) => l.status === "in_play")) group = "inplay";
     else if (risks.includes("healthy")) group = "ontrack";
     else group = "notdue";
+    // Three-colour timeliness (SDR touches only): green = reached out on time; amber = awaiting first touch inside the
+    // SLA, reached out late, or gone quiet; red = never reached out and the SLA has passed (or a reply is waiting).
+    const slaPassed = leads.some((l) => l.firstTouchOverdue);
+    let color: "green" | "amber" | "red"; let colorLabel: string;
+    if (group === "respond") { color = "red"; colorLabel = "Reply waiting"; }
+    else if (!firstTouch) { color = slaPassed ? "red" : "amber"; colorLabel = slaPassed ? "Not reached out" : "Awaiting outreach"; }
+    else if (leads.some((l) => l.status === "stalled")) { color = "amber"; colorLabel = "Gone quiet"; }
+    else if (daysToFirst.length && Math.min(...daysToFirst) > slaDays) { color = "amber"; colorLabel = "Reached out late"; }
+    else { color = "green"; colorLabel = "Reached out on time"; }
     const daysSinceLast = lastTouch ? Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(lastTouch)) / 86_400_000) : null;
     return {
       companyId: a.companyId, companyName: a.companyName, sdrOwnerId: a.sdrOwnerId, sdrName: a.sdrName, temperature: a.temperature, icpTier: a.icpTier,
@@ -318,12 +327,13 @@ export function daily(facts: LeadFact[], q: URLSearchParams, today: string, rule
       touches: a.touches, contactsWorked: a.contactsWorked, eligibleContacts: a.eligibleContacts,
       nextTask: leads.map((l) => l.nextTaskDue).filter(Boolean).sort()[0] ?? null,
       dealStatus: accountDeals(leads).filter((d) => d.via !== "duplicate_company")[0]?.status ?? "none",
-      group, nextAction: a.nextAction,
+      group, nextAction: a.nextAction, color, colorLabel,
       contacts: leads.map((l) => withRisk(l, rules)),
     };
   });
   const urg = Object.fromEntries(DAILY_GROUPS.map((g, i) => [g.key, i]));
-  accts.sort((x, y) => urg[x.group]! - urg[y.group]! || (x.temperature === "Hot" ? -1 : 1) - (y.temperature === "Hot" ? -1 : 1) || (y.daysSinceLast ?? 999) - (x.daysSinceLast ?? 999));
+  const cr = { red: 0, amber: 1, green: 2 } as const;
+  accts.sort((x, y) => cr[x.color] - cr[y.color] || urg[x.group]! - urg[y.group]! || (x.temperature === "Hot" ? -1 : 1) - (y.temperature === "Hot" ? -1 : 1) || (y.daysSinceLast ?? 999) - (x.daysSinceLast ?? 999));
 
   const summarise = (list: typeof accts) => {
     const decided = list.filter((x) => x.firstTouchWithinSla !== null);
@@ -336,6 +346,7 @@ export function daily(facts: LeadFact[], q: URLSearchParams, today: string, rule
       medianDaysToFirst: days.length ? days[Math.floor(days.length / 2)]! : null,
       touchedLast7: list.filter((x) => x.daysSinceLast !== null && x.daysSinceLast <= 7).length,
       groups: Object.fromEntries(DAILY_GROUPS.map((g) => [g.key, list.filter((x) => x.group === g.key).length])),
+      green: list.filter((x) => x.color === "green").length, amber: list.filter((x) => x.color === "amber").length, red: list.filter((x) => x.color === "red").length,
     };
   };
   const bySdr = sdrTable(rows, nf).map((s) => ({ ownerId: s.ownerId, name: s.name, region: s.region, ...summarise(accts.filter((a) => a.sdrOwnerId === s.ownerId)) }));
