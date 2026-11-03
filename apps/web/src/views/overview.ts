@@ -206,7 +206,7 @@ export async function overviewView(route: Route): Promise<HTMLElement> {
       cell(fmt.n(K(c, "stale")), `${pcTxt(K(c, "stale"), c.leads)} · ${fmt.n(K(c, "stale_sdr_action"))} need SDR action`, "cmo_stale", patch, `${label}: no touch in ${IA}+ business days`));
   };
   const scorecard = h("div", { class: "card scard" },
-    h("div", { class: "hd" }, h("span", { class: "t" }, "Outreach execution"), h("span", { class: "muted", style: "margin-left:auto" }, `Qualifying SDR touches since eligibility · targets: first touch ${PC.coverageTarget}%, follow-up ${PC.followUpTarget}% · click any number`)),
+    h("div", { class: "hd" }, h("span", { class: "t" }, "Event-lead execution"), h("span", { class: "muted", style: "margin-left:auto" }, `Qualifying SDR touches since eligibility · targets: first touch ${PC.coverageTarget}%, follow-up ${PC.followUpTarget}% · click any number`)),
     scRows.length ? h("div", { class: "tbl-wrap" }, h("table", { class: "sctable coretable" },
       h("thead", null, h("tr", null, h("th", null, "SDR"), h("th", { class: "n" }, "Eligible event leads"),
         h("th", { class: "n", title: "1+ qualifying SDR touch · % of eligible leads" }, "First touch done"),
@@ -215,6 +215,28 @@ export async function overviewView(route: Route): Promise<HTMLElement> {
       h("tbody", null, scRows.map(({ r, c }: any) => coreRow(h("span", { class: "link", onclick: () => open("eligible", { sdr: r.ownerId, region: "" }, r.name) }, r.name), c, { sdr: r.ownerId, region: "" }, r.name)),
         scRows.length > 1 ? coreRow(h("b", null, "All leads in view"), all, {}, "All", true) : null))) : h("div", { class: "empty" }, "No SDR has eligible leads in this view."),
     h("div", { class: "legend", style: "padding: 8px 14px" }, `Green at/above target · amber from ${Math.round(PC.amberFraction * 100)}% of target · red below. "Still inside first-touch SLA" = recently eligible or allocated leads that are not yet due, so a low % there is expected.`));
+
+  // ---- ACCOUNT EXECUTION (primary): unique HubSpot companies per SDR. Worked = 1+ qualifying SDR outreach to any eligible event contact.
+  const AX = d.accountExec;
+  const axRow = (name: any, r: any, patch: Partial<FilterState>) => h("tr", null, h("td", null, name),
+    h("td", { class: "sc sc-n" }, h("div", { class: "scb" }, fmt.n(r.accounts))),
+    h("td", { class: `sc ${colour(r.coveragePct, PC.coverageTarget)}`, title: "Accounts worked / eligible accounts" }, h("div", { class: "scb" }, fmt.n(r.worked)), h("div", { class: "scs" }, `${fmt.pct(r.coveragePct)} coverage`)),
+    h("td", { class: "sc sc-n" }, h("div", { class: "scb" }, fmt.n(r.notWorked))),
+    h("td", { class: "sc sc-n", title: "Worked accounts where a further touch is due with an active contact" }, h("div", { class: "scb" }, fmt.n(r.needFollowUp))),
+    h("td", { class: "sc sc-n" }, h("div", { class: "scb" }, fmt.n(r.contactsWorked)), h("div", { class: "scs" }, `of ${fmt.n(r.contacts)} · ${fmt.pct(r.contactCoveragePct)}`)),
+    h("td", { class: "sc sc-n" }, h("div", { class: "scb" }, `${fmt.n(r.oneContactWorked)} / ${fmt.n(r.twoPlusWorked)}`)),
+    h("td", { class: "sc sc-n" }, h("div", { class: "scb" }, fmt.n(r.active))),
+    h("td", { class: "sc sc-n" }, h("div", { class: "scb" }, fmt.n(r.paused)), h("div", { class: "scs" }, `${fmt.n(r.pausedCompanyWide)} company-wide`)),
+    h("td", { class: "sc sc-n" }, h("div", { class: "scb" }, fmt.n(r.qualified))));
+  const dispList = (m: Record<string, number>) => Object.entries(m).length ? Object.entries(m).sort((a, b) => b[1] - a[1]).map(([k, n]) => h("div", null, `${AX?.dispositionCodes?.[k] ?? k}: ${fmt.n(n)}`)) : h("div", { class: "faint" }, "None recorded");
+  const accountExec = AX ? h("div", { class: "card scard" },
+    h("div", { class: "hd" }, h("span", { class: "t" }, "Account execution"), h("span", { class: "muted", style: "margin-left:auto" }, "Primary measure · unique HubSpot companies · worked = 1+ qualifying SDR outreach to any eligible event contact")),
+    h("div", { class: "tbl-wrap" }, h("table", { class: "sctable" },
+      h("thead", null, h("tr", null, ["SDR", "Eligible accounts", "Accounts worked", "Not worked", "Need follow-up", "Contacts worked", "Accounts 1 / 2+ contacts", "In conversation", "Paused / closed", "Qualified"].map((x, i) => h("th", { class: i ? "n" : "" }, x)))),
+      h("tbody", null, AX.perSdr.map((r: any) => axRow(r.name, r, { sdr: r.ownerId, region: "" })), AX.perSdr.length > 1 ? axRow(h("b", null, "All"), AX.all, {}) : null))),
+    h("details", { class: "dmore", style: "padding: 0 14px 10px" }, h("summary", null, "Why worked accounts are not being pursued (verified dispositions)"),
+      h("div", { class: "grid2" }, h("div", null, h("b", null, "Account-level (company-wide)"), dispList(AX.all.dispositions.company)), h("div", null, h("b", null, "Contact-level"), dispList(AX.all.dispositions.contact)))),
+    h("div", { class: "legend", style: "padding: 8px 14px" }, "Contacts = eligible event contacts (not every CRM contact at the company). The event-lead table below keeps the original event-lead denominators.")) : null;
 
   // ---- A. Outreach timeliness (verified deadlines only)
   const trow = (name: any, c: any, patch: Partial<FilterState>, label: string) => h("tr", null, h("td", null, name),
@@ -269,6 +291,7 @@ export async function overviewView(route: Route): Promise<HTMLElement> {
 
   return h("div", null,
     banner,
+    accountExec,
     scorecard,
     timeliness,
     engagement,

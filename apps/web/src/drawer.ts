@@ -239,7 +239,7 @@ function detailBody(r: any): HTMLElement {
       kv("Action", r.action ? [h("span", { class: `abadge ${r.action.color}` }, r.action.label), " ", r.action.next] : r.nextAction),
       kv("Why / source", src),
       kv("Last contacted", lc?.at ? `${lastContactText(lc)}${lc.sdrAt ? ` · current SDR's last qualifying touch ${fmt.day(lc.sdrAt)}` : " · no qualifying touch by the current SDR"}` : "No outbound contact logged"),
-      kv("SDR touches", r.grouped ? `${r.groupedTouches} distinct qualifying touches across ${evs.length} events · ${r.groupedCurrentSdr} by the current SDR since allocation` : `${r.touchesSinceEligibility} since eligibility · ${r.currentSdrTouches ?? "–"} by the current SDR since allocation${r.otherSdrTouches ? ` · ${r.otherSdrTouches} by another SDR (not credited)` : ""}`),
+      kv("SDR touches", r.grouped ? `${r.groupedTouches} distinct qualifying touches across ${evs.length} events · ${r.groupedCurrentSdr} by the current SDR since allocation` : `${r.touchesSinceEligibility} counted (current SDR: since the event date; other SDRs: since eligibility ${fmt.day(r.eligibilityDate)}) · ${r.currentSdrTouchesSinceAllocation ?? "–"} by the current SDR since allocation (${fmt.day(r.allocationDate)})${r.otherSdrTouches ? ` · ${r.otherSdrTouches} by another SDR (not credited)` : ""}`),
       kv("HubSpot task", r.nextTaskDue ? `${r.nextTaskSubject ?? "Open task"} · due ${fmt.day(r.nextTaskDue)}${r.nextTaskOwnerId ? ` · ${sdrNames.get(r.nextTaskOwnerId) ?? "assigned to another user"}` : ""}` : "None open"),
       kv("First-touch SLA", r.dims?.sla ?? null),
       kv("Cadence", r.dims?.cadence ?? null),

@@ -579,3 +579,9 @@ details.moresec > summary { cursor: pointer; font-weight: 600; padding: 8px 0; o
 .ctrow.c-red .cdot2 { background: #d92d20; } .ctrow.c-amber .cdot2 { background: #f79009; } .ctrow.c-green .cdot2 { background: #12b76a; }
 @media (max-width: 900px) { .ahead { grid-template-columns: 12px minmax(0, 1fr) minmax(0, 1fr); } .astat { display: none; } .ctrow { grid-template-columns: 8px minmax(0, 1fr) minmax(0, 1fr); } .ctl { display: none; } .acontacts { padding-left: 8px; } }
 @media (prefers-color-scheme: dark) { .ctrow.hit { background: #3a3210; } .acontacts { background: rgba(255,255,255,.03); } }
+.ptrack .pg.main { border-color: #c7d2fe; }
+.wk { font-weight: 700; } .wk.y { color: #067647; } .wk.n { color: #475467; }
+.acov { padding: 6px 12px 2px; font-size: 12px; }
+.adisp { margin: 4px 12px; padding: 6px 10px; border-radius: 8px; background: #f2f4f7; font-size: 12.5px; }
+.dform input, .dform select { width: 100%; box-sizing: border-box; }
+@media (prefers-color-scheme: dark) { .adisp { background: #2a2d33; } .wk.y { color: #75e0a7; } }

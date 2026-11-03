@@ -1,6 +1,6 @@
 import {
   accountQueue, applyFilters, BUCKETS, categoryBreakdown, CATEGORY_LABEL, dataQuality, eventSummaries, fiscalQuarterOf, inBucket, nextAction,
-  normalizeFilters, parseQuarterKey, worklist, leadDimensions, ACTION_HEALTH_LABEL, outreachTimeliness, inactivity, overdueSource, deadlineState, leadWork, contactLevelInPlay, actionStatus, contactWorklist, DEFAULT_RULES, dealOrder, type DealRef, depthStats, sdrDepth, accountDepth, WINDOW_LABEL, BANDS, type TouchWindow, findings, narrative, RISK_LABEL, riskCounts, riskOf, sdrRisk, previousQuarter, qoq, quarterMetrics, regionBreakdown, rosterById, SDR_ROSTER, sdrTable, STATUS_LABEL, temperatureSummary,
+  normalizeFilters, parseQuarterKey, worklist, leadDimensions, ACTION_HEALTH_LABEL, outreachTimeliness, inactivity, overdueSource, deadlineState, leadWork, contactLevelInPlay, actionStatus, contactWorklist, accountWorklist, accountSummary, ACCOUNT_BUCKETS, DISPOSITION_CODES, type DispositionSet, DEFAULT_RULES, dealOrder, type DealRef, depthStats, sdrDepth, accountDepth, WINDOW_LABEL, BANDS, type TouchWindow, findings, narrative, RISK_LABEL, riskCounts, riskOf, sdrRisk, previousQuarter, qoq, quarterMetrics, regionBreakdown, rosterById, SDR_ROSTER, sdrTable, STATUS_LABEL, temperatureSummary,
   type EventCategory, type Filters, type LeadFact, type NormalizedFilters, type Region, type Rules,
 } from "@ecc/core";
 
@@ -181,7 +181,7 @@ export function dimCounts(list: LeadFact[], today: string, rules: Rules) {
   return c;
 }
 
-export function overview(facts: LeadFact[], q: URLSearchParams, today: string, rules: Rules = DEFAULT_RULES) {
+export function overview(facts: LeadFact[], q: URLSearchParams, today: string, rules: Rules = DEFAULT_RULES, disp?: DispositionSet) {
   const { nf, rows } = filtered(facts, q, today);
   const cur = nf.quarter ? parseQuarterKey(nf.quarter) : null;
   const prevKey = cur ? previousQuarter(cur) : null;
@@ -225,6 +225,12 @@ export function overview(facts: LeadFact[], q: URLSearchParams, today: string, r
     touchTarget: rules.touchTarget,
     // Three independent dimensions per SDR, all on the same population as the drill-downs (eligible leads, filtered).
     dimsAll: dimCounts(rows.filter((f) => f.eligible), today, rules),
+    // Account-level execution (primary). Accounts = unique HubSpot company ids per SDR; contacts = eligible event contacts.
+    accountExec: (() => {
+      const items = contactWorklist(rows, today, rules, disp).items;
+      const per = sdrTable(rows, nf).map((sd) => ({ ownerId: sd.ownerId, name: sd.name, ...accountSummary(accountWorklist(items.filter((i) => i.sdrOwnerId === sd.ownerId))) })).filter((r) => r.accounts > 0);
+      return { perSdr: per, all: accountSummary(accountWorklist(items)), dispositionCodes: DISPOSITION_CODES };
+    })(),
     missingOwner: rows.filter((f) => cmoKeys(f, today, rules).includes("x_missing_owner")).length,
     performanceColors: rules.performanceColors ?? DEFAULT_RULES.performanceColors, inactivityDays: rules.inactivityBusinessDays ?? 14,
     dims: Object.fromEntries(sdrTable(rows, nf).map((sd) => [sd.ownerId, dimCounts(rows.filter((f) => f.eligible && f.sdrOwnerId === sd.ownerId), today, rules)])),
@@ -380,7 +386,7 @@ const DAILY_GROUPS = [
   { key: "notdue", label: "Not yet due", hint: "Inside the first-touch window, recently closed lost, or unverified", cls: "neu" },
 ] as const;
 
-export function daily(facts: LeadFact[], q: URLSearchParams, today: string, rules: Rules = DEFAULT_RULES) {
+export function daily(facts: LeadFact[], q: URLSearchParams, today: string, rules: Rules = DEFAULT_RULES, disp?: DispositionSet) {
   const { nf, rows } = filtered(facts, q, today);
   const accts = accountQueue(rows, rules).map((a) => {
     const leads = a.contacts;
@@ -445,12 +451,17 @@ export function daily(facts: LeadFact[], q: URLSearchParams, today: string, rule
   const bySdr = sdrTable(rows, nf).map((s) => ({ ownerId: s.ownerId, name: s.name, region: s.region, ...summarise(accts.filter((a) => a.sdrOwnerId === s.ownerId)) }));
   // Action worklist (primary SDR view). The timeliness summary above stays in the response for reporting.
   const work = worklist(rows, today, rules);
-  const cw = contactWorklist(rows, today, rules);
+  const cw = contactWorklist(rows, today, rules, disp);
   const contacts = { groups: cw.groups, counts: cw.counts, total: cw.items.length,
     items: cw.items.slice(0, 3000).map((i) => ({ ...i,
       own: i.ownership ? { companySdr: ownerLabel(i.ownership.companySdrId, rules), companyOwner: ownerLabel(i.ownership.companyOwnerId, rules), contactOwner: ownerLabel(i.ownership.contactOwnerId, rules), contactSdr: ownerLabel(i.ownership.contactSdrId, rules), companyCount: i.ownership.companyCount } : null,
       lastBy: ownerLabel(i.lastOutboundOwnerId, rules), otherBy: ownerLabel(i.lastOtherSdrTouch?.ownerId ?? null, rules), dealOwner: ownerLabel(i.deal?.ownerId ?? null, rules) })) };
-  return { contacts, filters: nf, groups: DAILY_GROUPS, summary: summarise(accts), bySdr, accounts: accts.slice(0, 1500), total: accts.length,
+  // Account-first view (same contact items, grouped by HubSpot company id within each SDR).
+  const acctList = accountWorklist(contacts.items as any);
+  const accountsOut = { buckets: ACCOUNT_BUCKETS, summary: accountSummary(acctList), dispositionCodes: DISPOSITION_CODES,
+    window: "Account worked = at least one qualifying outreach by the current SDR to an eligible event contact, since that contact's event date (including before a later allocation date). Other reps' outreach is shown, never credited.",
+    items: acctList.map((a) => ({ ...a, companyDispositionLabel: a.companyDisposition ? DISPOSITION_CODES[a.companyDisposition.code] : null })) };
+  return { accountView: accountsOut, contacts, filters: nf, groups: DAILY_GROUPS, summary: summarise(accts), bySdr, accounts: accts.slice(0, 1500), total: accts.length,
     today, work: { sections: work.sections, counts: work.counts, total: work.items.length,
       items: work.items.slice(0, 2000).map((i) => ({ ...i, lastContact: { at: i.lastOutboundAt, by: ownerLabel(i.lastOutboundOwnerId, rules), sdrAt: i.currentSdrLastTouchAt, sdr: ownerLabel(i.sdrOwnerId, rules) } })) } };
 }

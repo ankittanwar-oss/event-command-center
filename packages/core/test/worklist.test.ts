@@ -213,3 +213,56 @@ describe("conversation recency, account intent and stale snapshots", () => {
     assert.equal(contactAction({ ...base, accountIntent: null }, NOV, R).group, "first_outreach"); // unknown is not penalised
   });
 });
+
+describe("account-first execution and dispositions", () => {
+  const NOV = "2026-11-03";
+  const mixed = () => dataset({
+    contacts: [contact(), contact({ id: "c2" }), contact({ id: "c3" }), contact({ id: "c4" })],
+    links: [["e1", "c1"], ["e1", "c2"], ["e1", "c3"], ["e1", "c4"]],
+    acts: [act({ ts: "2026-10-30" }), act({ ts: "2026-10-05", contactIds: ["c3"] }), act({ ts: "2026-10-06", contactIds: ["c4"] })],
+  });
+  test("one worked contact makes the account worked; untouched contacts are optional multithreading", async () => {
+    const { contactWorklist, accountWorklist, emptyDispositions } = await import("../src/index.js");
+    const disp = emptyDispositions();
+    disp.contact.set("c4", { scope: "contact", id: "c4", code: "competitor_satisfied", reason: "Uses Ironclad", evidence: "reply", revisitDate: null, confirmedBy: "Bobbi", confirmedAt: null, source: "dashboard" });
+    const items = contactWorklist(computeLeadFacts(mixed(), R, NOV), NOV, R, disp).items;
+    const [a] = accountWorklist(items);
+    assert.equal(a!.worked, true);
+    assert.equal(a!.coverage.available, 4); assert.equal(a!.coverage.worked, 3); assert.equal(a!.coverage.paused, 1);
+    assert.notEqual(a!.bucket, "first_outreach");
+    assert.equal(a!.bucket, "follow_up"); // c3 is overdue for follow-up
+    const c2 = a!.contacts.find((c: any) => c.contactId === "c2")! as any;
+    assert.ok(c2.multithread || c2.group === "review"); // untouched stakeholder: never makes the account "first outreach"
+    assert.equal(a!.companyDisposition, null); // a contact disposition never closes the account
+  });
+  test("a company-wide disposition pauses the account but a reply still surfaces", async () => {
+    const { contactWorklist, accountWorklist, emptyDispositions } = await import("../src/index.js");
+    const disp = emptyDispositions();
+    disp.company.set("co1", { scope: "company", id: "co1", code: "no_current_need", reason: "No CLM project this year", evidence: "call", revisitDate: "2027-03-01", confirmedBy: "Bobbi", confirmedAt: null, source: "dashboard" });
+    assert.equal(accountWorklist(contactWorklist(computeLeadFacts(mixed(), R, NOV), NOV, R, disp).items)[0]!.bucket, "paused");
+  });
+  test("structured HubSpot Lead Status establishes a contact disposition without confirmation", async () => {
+    const { contactAction } = await import("../src/index.js");
+    const f = computeLeadFacts(dataset({ contacts: [contact({ leadStatus: "NOT_INTERESTED" })], acts: [act({ ts: "2026-10-02" })] }), R, NOV)[0]!;
+    const a = contactAction(f, NOV, R);
+    assert.equal(a.group, "paused"); assert.match(a.reason, /from HubSpot/);
+  });
+});
+
+test("Zest AI / Michelle Chen pattern: pre-allocation touches are 'since the event', not 'since eligibility'; disposition stops cadence alerts", async () => {
+  const { contactAction, contactWorklist, accountWorklist, emptyDispositions } = await import("../src/index.js");
+  const NOV = "2026-11-03";
+  // Roundtable 26 Aug; company allocated to Bobbi 29 Oct; Bobbi emailed 27 & 28 Aug; Michelle replied 27 Aug (competitor).
+  const ds = dataset({ events: [event({ date: "2026-08-26" })], companies: [company({ allocationDate: "2026-10-29", temperatureRaw: "Warm" })],
+    acts: [act({ ts: "2026-08-27T20:48:35Z" }), act({ ts: "2026-08-27T23:26:39Z", kind: "INCOMING_EMAIL", direction: "INCOMING_EMAIL", title: "Re: Great having you at yesterday's roundtable" }), act({ ts: "2026-08-28T16:44:29Z" })] });
+  const f = computeLeadFacts(ds, R, NOV)[0]!;
+  assert.equal(f.eligibilityDate, "2026-10-29");
+  assert.equal(f.currentSdrTouches, 2); assert.equal(f.currentSdrTouchesSinceAllocation, 0);
+  assert.equal(contactAction(f, NOV, R).group, "follow_up");               // without a disposition: follow-up is due
+  const disp = emptyDispositions();
+  disp.contact.set("c1", { scope: "contact", id: "c1", code: "competitor_satisfied", reason: "Uses Ironclad", evidence: "Email reply 27 Aug 2026", revisitDate: null, confirmedBy: "Bobbi", confirmedAt: null, source: "dashboard" });
+  const a = contactAction(f, NOV, R, disp);
+  assert.equal(a.group, "paused"); assert.equal(a.overdueBusinessDays, null);
+  const acc = accountWorklist(contactWorklist([f], NOV, R, disp).items)[0]!;
+  assert.equal(acc.worked, true); assert.equal(acc.bucket, "paused"); assert.equal(acc.companyDisposition, null);
+});

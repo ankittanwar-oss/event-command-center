@@ -252,6 +252,7 @@ export interface LeadFact {
   nextTaskOwnerId?: string | null;
   slaApplies?: boolean;
   accountIntent?: AccountIntent | null;
+  contactLeadStatus?: string | null;    // HubSpot contact Lead Status (structured disposition source)
   nextMeetingAt?: string | null;
   /** Ownership as recorded on each record (for reconciliation; the SDR used everywhere is sdrOwnerId). */
   ownership?: { companySdrId: string | null; companyOwnerId: string | null; contactOwnerId: string | null; contactSdrId: string | null; companyCount: number; allocationDate: string | null };        // a scheduled meeting in the future (verified commitment)

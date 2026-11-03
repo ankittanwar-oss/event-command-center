@@ -340,7 +340,7 @@ export function computeLeadFact(
     lastReplyAt, lastOutboundAt: lastOutbound?.timestamp ?? null, lastOutboundOwnerId: lastOutbound?.ownerId ?? null, lastOutboundKind: lastOutbound?.kind ?? null, lastMeetingAt,
     currentSdrTouchesSinceAllocation: sdr && allocationDate ? touches.filter((t) => t.ownerId === sdr && day(t) >= allocationDate).length : null,
     currentSdrTouches, otherSdrTouches, lastOtherSdrTouch, lastTouchOwnerId, currentSdrLastTouchAt,
-    nextTaskSubject: nextTask?.subject ?? null, nextTaskOwnerId: nextTask?.ownerId ?? null, slaApplies: !noSla, accountIntent: company?.intent === undefined ? undefined : company.intent,
+    nextTaskSubject: nextTask?.subject ?? null, nextTaskOwnerId: nextTask?.ownerId ?? null, slaApplies: !noSla, contactLeadStatus: contact.leadStatus ?? null, accountIntent: company?.intent === undefined ? undefined : company.intent,
     ownership: { companySdrId: company?.sdrOwnerId ?? null, companyOwnerId: company?.hubspotOwnerId ?? null, contactOwnerId: contact.ownerId ?? null,
       contactSdrId: contact.sdrOwnerId ?? null, companyCount: contact.companyIds?.length ?? (contact.companyId ? 1 : 0), allocationDate },
     nextMeetingAt: contactActs.filter((a) => a.kind === "MEETING" && toDate(a.timestamp)! > today).map((a) => a.timestamp).sort()[0] ?? null,

@@ -2,6 +2,7 @@
 // Presentation logic only: it reads existing facts and rules and never changes status, SLA or any reported metric.
 import { rosterById, type CadenceRule, type Rules } from "./config.js";
 import { expectedTouches } from "./leads.js";
+import { DISPOSITION_CODES, dispositionsFor, type DispositionSet } from "./dispositions.js";
 import { addDays, businessDaysBetween, toDate } from "./dates.js";
 import type { LeadFact } from "./types.js";
 
@@ -375,7 +376,8 @@ export const CONTACT_GROUPS = [
   { key: "qualified", label: "Qualified / handed off", hint: "Verified SQL: the deal has a Became Qualified to Buy Date" },
   { key: "low", label: "Lower priority", hint: "Company intent is Cold and there is no verified event engagement" },
   { key: "review", label: "Needs review", hint: "Missing or contradictory data" },
-  { key: "progress", label: "Up to date", hint: "Next touch not due yet, task scheduled, in conversation, or paused" },
+  { key: "progress", label: "Up to date", hint: "Next touch not due yet, task scheduled, or in conversation" },
+  { key: "paused", label: "Paused / closed", hint: "Verified commercial reason to stop or defer outreach" },
 ] as const;
 export type ContactGroup = (typeof CONTACT_GROUPS)[number]["key"];
 
@@ -428,7 +430,7 @@ export function activeConversation(f: LeadFact, today: string, rules: Rules): st
  *  D. SDR outreach: none -> First outreach; done -> Follow up when due; breached deadline -> red
  * An open deal without an SQL date is context only. Old replies/meetings never mean "in conversation".
  */
-export function contactAction(f0: LeadFact, today: string, rules: Rules): ContactAction {
+export function contactAction(f0: LeadFact, today: string, rules: Rules, disp?: DispositionSet): ContactAction {
   // Re-derive the status from today's rules so stale snapshot labels (e.g. any open deal = "in play") cannot leak in.
   const conv = activeConversation(f0, today, rules);
   const sql = sqlDeal(f0);
@@ -451,6 +453,11 @@ export function contactAction(f0: LeadFact, today: string, rules: Rules): Contac
   const mk = (group: ContactGroup, action: string, reason: string, color: ActionColor, sort: number): ContactAction =>
     ({ group: low && (group === "first_outreach" || group === "follow_up") && color !== "red" ? "low" : group, action, reason, color: low && color === "amber" ? "grey" : color, due: w.due, overdueBusinessDays: w.overdueBusinessDays, sort: low ? sort + 20 : sort });
 
+  // Verified contact disposition (dashboard-confirmed or structured HubSpot): no routine cadence alerts.
+  // A new reply or an SDR task due still surfaces first (handled below only when no disposition applies to them).
+  const dsp = dispositionsFor(f0, disp, today).contact;
+  if (dsp && w.dueSource !== "reply" && !(w.dueSource === "task" && (w.section === "overdue" || w.section === "today")))
+    return { group: "paused", action: DISPOSITION_CODES[dsp.code], reason: `${dsp.reason ?? ""}${dsp.source === "hubspot" ? " (from HubSpot)" : dsp.confirmedBy ? ` · confirmed by ${dsp.confirmedBy}` : ""}${dsp.revisitDate ? ` · revisit ${dsp.revisitDate}` : ""}`, color: "grey", due: dsp.revisitDate, overdueBusinessDays: null, sort: 11 };
   // B (commitments first): reply needing a response, SDR-owned HubSpot task due.
   if (w.dueSource === "reply") return n > 0 ? mk("respond", "Reply to prospect", `Replied ${replyDate(f)}; no response for ${bd(n)}`, "red", 0) : mk("respond", "Reply to prospect", `Replied ${replyDate(f)}`, "amber", 1);
   if (w.dueSource === "task" && (w.section === "overdue" || w.section === "today"))
@@ -484,12 +491,12 @@ export function contactAction(f0: LeadFact, today: string, rules: Rules): Contac
 }
 
 /** One row per contact across all their event-lead records. Touches are distinct activities, never summed per event. */
-export function contactWorklist(rows: LeadFact[], today: string, rules: Rules) {
+export function contactWorklist(rows: LeadFact[], today: string, rules: Rules, disp?: DispositionSet) {
   const by = new Map<string, LeadFact[]>();
   for (const f of rows) if (f.eligible) (by.get(f.contactId) ?? by.set(f.contactId, []).get(f.contactId)!).push(f);
-  const gOrder: Record<ContactGroup, number> = { respond: 0, first_outreach: 2, follow_up: 1, qualified: 3, low: 4, review: 5, progress: 6 };
+  const gOrder: Record<ContactGroup, number> = { respond: 0, first_outreach: 2, follow_up: 1, qualified: 3, low: 4, review: 5, progress: 6, paused: 7 };
   const items = [...by.values()].map((leads) => {
-    const scored = leads.map((f) => ({ f, a: contactAction(f, today, rules), e: engagementReason(f) }));
+    const scored = leads.map((f) => ({ f, a: contactAction(f, today, rules, disp), e: engagementReason(f) }));
     scored.sort((x, y) => x.a.sort - y.a.sort || gOrder[x.a.group] - gOrder[y.a.group] || x.e.strength - y.e.strength || (x.a.due ?? "9").localeCompare(y.a.due ?? "9"));
     // A contact already worked on any of their events is never "first outreach".
     let top = scored[0]!;
@@ -518,6 +525,7 @@ export function contactWorklist(rows: LeadFact[], today: string, rules: Rules) {
         sdrCategory: f.accountIntent?.sdrCategory ?? null, lifecycleCustom: f.accountIntent?.lifecycleCustom ?? null, icp: f.accountIntent?.icp ?? f.icpTier ?? null,
         engagementScore: f.accountIntent?.engagementScore ?? null, factorsIntent: f.accountIntent?.factorsIntent ?? null,
         synced: !!f.accountIntent },
+      disposition: dispositionsFor(f, disp, today).contact, companyDisposition: dispositionsFor(f, disp, today).company,
       lastReplyAt: f.lastReplyAt ?? null, conversation: activeConversation(f, today, rules), ownership: f.ownership ?? null, intentRank: ({ hot: 0, warm: 1, unknown: 2, cold: 3 } as const)[intentLevel(f)],
       ...top.a, eventId: f.eventId,
       yourTouches, yourLastTouchAt, yourTouchesSinceAllocation: sinceAlloc, sdrTouchesAny: ids.size,
@@ -533,4 +541,87 @@ export function contactWorklist(rows: LeadFact[], today: string, rules: Rules) {
   items.sort((a, b) => a.sort - b.sort || a.intentRank - b.intentRank || a.engagementStrength - b.engagementStrength || (a.temperature === "Hot" ? -1 : 0) - (b.temperature === "Hot" ? -1 : 0) || (a.due ?? "9").localeCompare(b.due ?? "9"));
   const counts = Object.fromEntries(CONTACT_GROUPS.map((g) => [g.key, items.filter((i) => i.group === g.key).length])) as Record<ContactGroup, number>;
   return { groups: CONTACT_GROUPS, counts, items };
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// ACCOUNT-FIRST execution. SDRs work accounts: an account is WORKED once the current SDR has at least one qualifying
+// outreach (since the event) to at least one of its eligible event contacts. Contact coverage is depth, not a
+// mandate. Each account sits in ONE primary bucket; every contact keeps its own action.
+// ---------------------------------------------------------------------------------------------------------------
+export const ACCOUNT_BUCKETS = [
+  { key: "respond", label: "Respond now", hint: "A prospect replied, or a HubSpot task is due" },
+  { key: "first_outreach", label: "First outreach", hint: "Account not worked yet: no qualifying outreach by the SDR to any contact" },
+  { key: "follow_up", label: "Follow up", hint: "Worked; a further touch is due with an active contact" },
+  { key: "review", label: "Needs review", hint: "Missing or contradictory data" },
+  { key: "progress", label: "Up to date / in progress", hint: "Worked; nothing due right now (multithreading optional)" },
+  { key: "paused", label: "Paused / closed", hint: "Verified company-wide disposition, or every worked contact is paused" },
+  { key: "low", label: "Lower priority", hint: "Not worked; Cold intent and no verified engagement" },
+  { key: "qualified", label: "Qualified / handed off", hint: "Verified SQL; no outstanding SDR action" },
+] as const;
+export type AccountBucket = (typeof ACCOUNT_BUCKETS)[number]["key"];
+
+type CItem = ReturnType<typeof contactWorklist>["items"][number];
+
+export function accountWorklist(items: CItem[]) {
+  const by = new Map<string, CItem[]>();
+  for (const i of items) { const k = i.companyId ?? `contact:${i.contactId}`; (by.get(k) ?? by.set(k, []).get(k)!).push(i); }
+  const order: Record<string, number> = { respond: 0, follow_up: 1, first_outreach: 2, review: 3, progress: 4, low: 5, qualified: 6, paused: 7 };
+  const accounts = [...by.entries()].map(([key, cs]) => {
+    const worked = cs.filter((c) => c.yourTouches > 0);
+    const isWorked = worked.length > 0;
+    const has = (g: string, list: CItem[] = cs) => list.some((c) => c.group === g);
+    const companyDisp = cs.map((c) => c.companyDisposition).find(Boolean) ?? null;
+    let bucket: AccountBucket;
+    if (has("respond")) bucket = "respond";
+    else if (companyDisp) bucket = "paused";
+    else if (has("qualified")) bucket = "qualified";
+    else if (!isWorked) bucket = has("first_outreach") ? "first_outreach" : has("review") ? "review" : has("low") ? "low"
+      : cs.every((c) => c.group === "paused") ? "paused" : "progress";
+    else if (has("follow_up", worked)) bucket = "follow_up";
+    else if (worked.every((c) => c.group === "paused") && !has("progress")) bucket = "paused";
+    else if (has("review", worked)) bucket = "review";
+    else bucket = "progress";
+    // Within a worked account, untouched contacts are optional multithreading, not "first outreach" for the account.
+    const contacts = cs.map((c) => (isWorked && (c.group === "first_outreach" || c.group === "low") ? { ...c, multithread: true } : c));
+    contacts.sort((a, b) => (order[a.group] ?? 9) - (order[b.group] ?? 9) || a.sort - b.sort);
+    const top = contacts.find((c) => !(c as any).multithread && c.group !== "paused") ?? contacts[0]!;
+    const count = (g: string) => cs.filter((c) => c.group === g).length;
+    const lastSdr = cs.map((c) => c.yourLastTouchAt).filter(Boolean).sort().pop() ?? null;
+    return {
+      key, companyId: cs[0]!.companyId, companyName: cs[0]!.companyName ?? cs[0]!.contactName, intent: cs[0]!.intent, sdrOwnerId: cs[0]!.sdrOwnerId, sdrName: cs[0]!.sdrName,
+      bucket, worked: isWorked, top, contacts, companyDisposition: companyDisp,
+      coverage: {
+        available: cs.length, worked: worked.length, notWorked: cs.length - worked.length,
+        active: cs.filter((c) => c.conversation).length, paused: count("paused"), qualified: count("qualified"),
+      },
+      actions: { respond: count("respond"), follow_up: count("follow_up"), first_outreach: count("first_outreach"), review: count("review"), progress: count("progress"), paused: count("paused"), low: count("low"), qualified: count("qualified") },
+      lastSdrTouch: lastSdr, conversation: cs.some((c) => c.conversation),
+    };
+  });
+  const rank: Record<string, number> = Object.fromEntries(ACCOUNT_BUCKETS.map((b, i) => [b.key, i]));
+  accounts.sort((a, b) => rank[a.bucket]! - rank[b.bucket]! || a.top.sort - b.top.sort || (a.top.intentRank ?? 2) - (b.top.intentRank ?? 2) || (a.companyName ?? "").localeCompare(b.companyName ?? ""));
+  return accounts;
+}
+
+/** Account-level execution summary (CMO + Daily). Counts unique company ids; contacts are eligible event contacts. */
+export function accountSummary(accounts: ReturnType<typeof accountWorklist>) {
+  const n = (p: (a: (typeof accounts)[number]) => boolean) => accounts.filter(p).length;
+  const contacts = accounts.reduce((s, a) => s + a.coverage.available, 0);
+  const contactsWorked = accounts.reduce((s, a) => s + a.coverage.worked, 0);
+  const contactDisp: Record<string, number> = {}, companyDisp: Record<string, number> = {};
+  for (const a of accounts) {
+    if (a.companyDisposition) companyDisp[a.companyDisposition.code] = (companyDisp[a.companyDisposition.code] ?? 0) + 1;
+    for (const c of a.contacts) if (c.disposition) contactDisp[c.disposition.code] = (contactDisp[c.disposition.code] ?? 0) + 1;
+  }
+  return {
+    accounts: accounts.length, worked: n((a) => a.worked), notWorked: n((a) => !a.worked),
+    coveragePct: accounts.length ? Math.round((n((a) => a.worked) / accounts.length) * 1000) / 10 : null,
+    needFollowUp: n((a) => a.bucket === "follow_up"), respond: n((a) => a.bucket === "respond"), active: n((a) => a.conversation),
+    qualified: n((a) => a.bucket === "qualified"), paused: n((a) => a.bucket === "paused"), pausedCompanyWide: n((a) => !!a.companyDisposition),
+    oneContactWorked: n((a) => a.coverage.worked === 1), twoPlusWorked: n((a) => a.coverage.worked >= 2),
+    workedButQuiet: n((a) => a.worked && a.bucket === "follow_up"),
+    contacts, contactsWorked, contactCoveragePct: contacts ? Math.round((contactsWorked / contacts) * 1000) / 10 : null,
+    dispositions: { contact: contactDisp, company: companyDisp },
+    buckets: Object.fromEntries(ACCOUNT_BUCKETS.map((b) => [b.key, { accounts: n((a) => a.bucket === b.key), contacts: accounts.filter((a) => a.bucket === b.key).reduce((s, a) => s + a.coverage.available, 0) }])),
+  };
 }

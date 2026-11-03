@@ -9,6 +9,7 @@ import { getSetting, setSetting } from "../db/repo.js";
 import { loadRules, validateRules } from "../rules.js";
 import { recomputeFacts, runSync } from "../sync/sync.js";
 import { getSnapshot, invalidateSnapshot, ownerNames } from "./cache.js";
+import { clearDisposition, loadDispositions, saveDisposition } from "./dispositions.js";
 import { checkAppAuth, HttpError, readJson, requireAdmin, SECURITY_HEADERS, send } from "./http.js";
 import * as v from "./views.js";
 
@@ -53,10 +54,10 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL) {
 
   if (method === "GET") {
     switch (p) {
-      case "/api/overview": return send(res, 200, v.overview(s.facts, q, t, rules));
+      case "/api/overview": return send(res, 200, v.overview(s.facts, q, t, rules, await loadDispositions()));
       case "/api/leads": return send(res, 200, v.leads(s.facts, q, t, rules));
       case "/api/sdr": return send(res, 200, v.sdrs(s.facts, q, t, rules));
-      case "/api/daily": return send(res, 200, v.daily(s.facts, q, t, rules));
+      case "/api/daily": return send(res, 200, v.daily(s.facts, q, t, rules, await loadDispositions()));
       case "/api/depth": return send(res, 200, v.depth(s.facts, q, t, rules));
       case "/api/accounts": return send(res, 200, v.accounts(s.facts, q, t, rules));
       case "/api/events": return send(res, 200, v.events(s.facts, q, t, rules));
@@ -134,6 +135,20 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL) {
       .catch((e) => log.error("manual sync crashed", { error: errMessage(e) }))
       .finally(() => { manualSyncRunning = false; });
     return send(res, 202, { started: true });
+  }
+
+  // Commercial dispositions: confirmed by a named person; stored in the dashboard database (HubSpot is read-only).
+  if (method === "POST" && p === "/api/dispositions") {
+    const body = await readJson(req);
+    const err = await saveDisposition(body);
+    if (err) return send(res, 400, { error: err });
+    return send(res, 200, { ok: true });
+  }
+  if (method === "DELETE" && p === "/api/dispositions") {
+    const body = await readJson(req);
+    if (!body?.scope || !body?.id || !body?.confirmedBy) return send(res, 400, { error: "scope, id and confirmedBy are required" });
+    await clearDisposition(body.scope, String(body.id), String(body.confirmedBy));
+    return send(res, 200, { ok: true });
   }
 
   if (method === "PUT" && p === "/api/admin/rules") {
