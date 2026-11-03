@@ -67,7 +67,9 @@ export function leadWork(f: LeadFact, today: string, rules: Rules): WorkItem {
     ({ section, action, why, due, dueSource, overdueBusinessDays: overdue, lead: f });
 
   // 1. Prospect reply nobody has answered (any outbound by SDR, AE or anyone else after the reply counts as answered).
-  const reply = replyDate(f);
+  const replyAny = replyDate(f);
+  // Only a recent reply can be "waiting for a response"; older ones are history (see rules.conversationRecencyDays).
+  const reply = replyAny && replyAny >= addDays(today, -(rules.conversationRecencyDays ?? 30)) ? replyAny : null;
   const answeredAt = toDate(f.lastOutboundAt ?? null) ?? (f.lastOutboundAt === undefined ? toDate(f.lastTouchAt) : null);
   if (reply && (!answeredAt || answeredAt < reply)) {
     const due = addBusinessDays(reply, 1, rules);
@@ -371,6 +373,7 @@ export const CONTACT_GROUPS = [
   { key: "first_outreach", label: "First outreach", hint: "Eligible contacts with no qualifying SDR outreach yet" },
   { key: "follow_up", label: "Follow up", hint: "Already contacted; another touch is due" },
   { key: "qualified", label: "Qualified / handed off", hint: "Verified SQL: the deal has a Became Qualified to Buy Date" },
+  { key: "low", label: "Lower priority", hint: "Company intent is Cold and there is no verified event engagement" },
   { key: "review", label: "Needs review", hint: "Missing or contradictory data" },
   { key: "progress", label: "Up to date", hint: "Next touch not due yet, task scheduled, in conversation, or paused" },
 ] as const;
@@ -380,9 +383,10 @@ export interface ContactAction { group: ContactGroup; action: string; reason: st
 
 /** Why this contact matters, from verified evidence only. Sponsored-event attendance is not SpotDraft engagement. */
 export function engagementReason(f: LeadFact): { text: string; strength: number } {
-  const reply = replyDate(f);
+  const reply = /^Prospect replied/.test(f.inPlayReason ?? "") ? replyDate(f) : null;
   if (reply) return { text: `Replied ${reply}`, strength: 0 };
-  if (f.lastMeetingAt || /^Meeting on/.test(f.inPlayReason ?? "")) return { text: `Meeting ${toDate(f.lastMeetingAt ?? null) ?? (f.inPlayReason ?? "").slice(11)}`, strength: 0 };
+  if (f.nextMeetingAt) return { text: `Meeting scheduled ${toDate(f.nextMeetingAt)}`, strength: 0 };
+  if (/^Meeting on/.test(f.inPlayReason ?? "")) return { text: (f.inPlayReason ?? "").replace("Meeting on", "Meeting"), strength: 0 };
   const ev = f.eventName.split(/[|:]/)[0]!.trim().slice(0, 40);
   if (f.attendance === "attended") return f.eventCategory === "sponsored"
     ? { text: `Attended ${ev} (sponsored · SpotDraft engagement unverified)`, strength: 3 }
@@ -391,50 +395,99 @@ export function engagementReason(f: LeadFact): { text: string; strength: number 
   return { text: `Registered for ${ev}${f.eventCategory === "sponsored" ? " (sponsored)" : ""} · attendance not recorded`, strength: 4 };
 }
 
-export function contactAction(f: LeadFact, today: string, rules: Rules): ContactAction {
+/** Current company intent, normalised for decisions: "hot" (Surging), "warm", "cold", or "unknown" (not recorded / not synced). */
+export function intentLevel(f: LeadFact): "hot" | "warm" | "cold" | "unknown" {
+  const l = (f.accountIntent?.level ?? "").toLowerCase();
+  if (!l) return "unknown";
+  if (l.startsWith("surging") || l.startsWith("hot")) return "hot";
+  if (l.startsWith("warm")) return "warm";
+  if (l.startsWith("cold")) return "cold";
+  return "unknown";
+}
+
+/** Verified SQL: an OPEN deal with a Became Qualified to Buy Date (from the deals, not from status text). */
+export function sqlDeal(f: LeadFact) {
+  return (f.deals ?? []).filter((d) => d.status === "open" && !!d.sqlDate && d.via !== "duplicate_company").sort((a, b) => (b.sqlDate ?? "").localeCompare(a.sqlDate ?? ""))[0] ?? null;
+}
+
+/** Active conversation = recent real reply / recent meeting (rules.conversationRecencyDays) or a future meeting. */
+export function activeConversation(f: LeadFact, today: string, rules: Rules): string | null {
+  const from = addDays(today, -(rules.conversationRecencyDays ?? 30));
+  if (f.nextMeetingAt) return `Meeting scheduled ${toDate(f.nextMeetingAt)}`;
+  const r = f.inPlayReason ?? "";
+  const m = /^(Meeting on|Prospect replied on) (\d{4}-\d{2}-\d{2})/.exec(r);
+  if (m && m[2]! >= from) return r;
+  return null;
+}
+
+/**
+ * Decision sequence (per event-lead record):
+ *  A. verified SQL (Became Qualified to Buy Date on an open deal)  -> Qualified / handed off (an SDR task due still wins)
+ *  B. recent reply needing a response / HubSpot task due            -> Respond now; recent conversation -> In progress
+ *  C. company intent Hot/Warm or verified event engagement          -> normal priority; otherwise lower priority
+ *  D. SDR outreach: none -> First outreach; done -> Follow up when due; breached deadline -> red
+ * An open deal without an SQL date is context only. Old replies/meetings never mean "in conversation".
+ */
+export function contactAction(f0: LeadFact, today: string, rules: Rules): ContactAction {
+  // Re-derive the status from today's rules so stale snapshot labels (e.g. any open deal = "in play") cannot leak in.
+  const conv = activeConversation(f0, today, rules);
+  const sql = sqlDeal(f0);
+  let f = f0;
+  if (f0.status === "in_play" && !sql && !conv && f0.inPlayReason !== "Disqualified") {
+    const stall = rules.cadence[f0.temperature ?? "Warm"].stallBusinessDays;
+    const since = toDate(f0.lastTouchAt);
+    const status = f0.touchesSinceEligibility === 0 ? "never_worked" : since && businessDaysBetween(since, today, rules.businessCalendar) > stall ? "stalled" : "first_touch";
+    f = { ...f0, status, inPlayReason: null } as LeadFact;
+  }
   const w = leadWork(f, today, rules);
   const n = w.overdueBusinessDays ?? 0;
   const bd = (x: number) => `${x} business day${x === 1 ? "" : "s"}`;
   const ia = inactivity(f, today, rules);
   const temp = f.temperature ?? "Lead";
-  const sla = rules.cadence[f.temperature ?? "Warm"].firstTouchBusinessDays;
-  const mk = (group: ContactGroup, action: string, reason: string, color: ActionColor, sort: number): ContactAction => ({ group, action, reason, color, due: w.due, overdueBusinessDays: w.overdueBusinessDays, sort });
-  switch (w.dueSource) {
-    case "reply": return n > 0 ? mk("respond", "Reply to prospect", `Replied ${replyDate(f)}; no response for ${bd(n)}`, "red", 0) : mk("respond", "Reply to prospect", `Replied ${replyDate(f)}`, "amber", 1);
-    case "task":
-      if (w.section === "overdue") return mk("respond", "Complete HubSpot task", `${w.why.replace(/^Task: /, "")} · overdue by ${bd(n)}`, "red", 0);
-      if (w.section === "today") return mk("respond", "Complete HubSpot task", `${w.why.replace(/^Task: /, "")} · due today`, "amber", 1);
-      return mk("progress", "Task scheduled", `${w.why.replace(/^Task: /, "")} · due ${w.due}`, "green", 9);
-    case "sla":
-      if (w.section === "overdue") return mk("first_outreach", "Send first outreach", `${temp} SLA (${sla} business days) passed ${bd(n)} ago`, "red", 2);
-      if (w.section === "today") return mk("first_outreach", "Send first outreach", `${temp} SLA due today`, "amber", 3);
-      return mk("first_outreach", "Send first outreach", `${temp} SLA: due by ${w.due}`, "amber", 4);
-    case "cadence": {
-      const next = `touch ${f.touchesSinceEligibility + 1}`;
-      if (w.section === "overdue") return mk("follow_up", "Send follow-up", `${next} · no touch for ${bd(ia.businessDays ?? 0)} (was due ${w.due})`, "red", 3);
-      if (w.section === "today") return mk("follow_up", "Send follow-up", `${next} · due ${w.due && w.due < today ? `since ${w.due}` : "today"}`, "amber", 4);
-      if (ia.stale) return mk("follow_up", "Send follow-up", `${next} · no touch for ${bd(ia.businessDays ?? 0)}`, "amber", 5);
-      return mk("progress", "Next touch not due yet", `${next} due by ${w.due}`, "green", 9);
-    }
-  }
-  if (f.status === "in_play") {
-    const r = f.inPlayReason ?? "";
-    if (r.startsWith("Qualified (SQL")) return mk("qualified", "AE handoff · qualified", r.replace(/^Qualified \(SQL ([^)]+)\): /, "SQL $1 · "), "green", 8);
-    if (r === "Disqualified") return mk("progress", "No action now", "Disqualified in HubSpot", "grey", 10);
-    return mk("progress", "In conversation", r, "green", 9);
-  }
+  const slaDays = rules.cadence[f.temperature ?? "Warm"].firstTouchBusinessDays;
+  const intent = intentLevel(f);
+  const engaged = engagementReason(f).strength <= 1;
+  const low = intent === "cold" && !engaged;          // C: no current intent and no verified engagement
+  const mk = (group: ContactGroup, action: string, reason: string, color: ActionColor, sort: number): ContactAction =>
+    ({ group: low && (group === "first_outreach" || group === "follow_up") && color !== "red" ? "low" : group, action, reason, color: low && color === "amber" ? "grey" : color, due: w.due, overdueBusinessDays: w.overdueBusinessDays, sort: low ? sort + 20 : sort });
+
+  // B (commitments first): reply needing a response, SDR-owned HubSpot task due.
+  if (w.dueSource === "reply") return n > 0 ? mk("respond", "Reply to prospect", `Replied ${replyDate(f)}; no response for ${bd(n)}`, "red", 0) : mk("respond", "Reply to prospect", `Replied ${replyDate(f)}`, "amber", 1);
+  if (w.dueSource === "task" && (w.section === "overdue" || w.section === "today"))
+    return w.section === "overdue" ? mk("respond", "Complete HubSpot task", `${w.why.replace(/^Task: /, "")} · overdue by ${bd(n)}`, "red", 0) : mk("respond", "Complete HubSpot task", `${w.why.replace(/^Task: /, "")} · due today`, "amber", 1);
+  // A. verified SQL
+  if (sql) return mk("qualified", "AE handoff · qualified", `SQL ${sql.sqlDate} · ${sql.name ?? "deal"}${sql.stageLabel ? ` (${sql.stageLabel})` : ""}`, "green", 8);
+  if (w.dueSource === "task") return mk("progress", "Task scheduled", `${w.why.replace(/^Task: /, "")} · due ${w.due}`, "green", 9);
+  // B. recent two-way engagement
+  if (conv) return mk("progress", "In conversation", conv, "green", 9);
+  // Paused / data problems
+  if (f.inPlayReason === "Disqualified") return mk("progress", "No action now", "Disqualified in HubSpot", "grey", 10);
   if (f.status === "recently_lost") return mk("progress", "No action now", f.statusReason, "grey", 10);
   if (f.status === "unverifiable") return mk("review", "Check outreach logging", "Outreach is logged on the company, not on this contact", "grey", 7);
   if (!f.eligibilityDate) return mk("review", "Check event data", "Event date missing", "grey", 7);
-  if (f.touchesSinceEligibility === 0) return mk("first_outreach", "Send first outreach", `No SLA deadline (eligible ${f.eligibilityDate}, before the SLA start)`, "grey", 6);
-  return mk("review", "Check timing", w.why, "grey", 7);
+  // D. outreach
+  if (w.dueSource === "sla") {
+    if (w.section === "overdue") return mk("first_outreach", "Send first outreach", `${temp} SLA (${slaDays} business days) passed ${bd(n)} ago`, "red", 2);
+    if (w.section === "today") return mk("first_outreach", "Send first outreach", `${temp} SLA due today`, "amber", 3);
+    return mk("first_outreach", "Send first outreach", `${temp} SLA: due by ${w.due}`, "amber", 4);
+  }
+  if (f.touchesSinceEligibility === 0) return mk("first_outreach", "Send first outreach", `No SLA deadline (eligible ${f.eligibilityDate}, before the SLA start)`, intent === "hot" || intent === "warm" ? "amber" : "grey", intent === "hot" ? 4 : intent === "warm" ? 5 : 6);
+  if (w.dueSource === "cadence") {
+    const next = `touch ${f.touchesSinceEligibility + 1}`;
+    if (w.section === "overdue") return mk("follow_up", "Send follow-up", `${next} · no touch for ${bd(ia.businessDays ?? 0)} (was due ${w.due})`, "red", 3);
+    if (w.section === "today") return mk("follow_up", "Send follow-up", `${next} · due ${w.due && w.due < today ? `since ${w.due}` : "today"}`, "amber", 4);
+    if (ia.stale) return mk("follow_up", "Send follow-up", `${next} · no touch for ${bd(ia.businessDays ?? 0)}`, "amber", 5);
+    // "Up to date" only with a verified reason: a recent SDR touch and the next one not yet due.
+    return mk("progress", "Next touch not due yet", `${next} due by ${w.due} · last SDR touch ${toDate(f.lastTouchAt)}`, "green", 9);
+  }
+  return mk("review", "Check timing", w.why || "No reliable next step could be determined", "grey", 7);
 }
 
 /** One row per contact across all their event-lead records. Touches are distinct activities, never summed per event. */
 export function contactWorklist(rows: LeadFact[], today: string, rules: Rules) {
   const by = new Map<string, LeadFact[]>();
   for (const f of rows) if (f.eligible) (by.get(f.contactId) ?? by.set(f.contactId, []).get(f.contactId)!).push(f);
-  const gOrder: Record<ContactGroup, number> = { respond: 0, first_outreach: 2, follow_up: 1, qualified: 3, review: 4, progress: 5 };
+  const gOrder: Record<ContactGroup, number> = { respond: 0, first_outreach: 2, follow_up: 1, qualified: 3, low: 4, review: 5, progress: 6 };
   const items = [...by.values()].map((leads) => {
     const scored = leads.map((f) => ({ f, a: contactAction(f, today, rules), e: engagementReason(f) }));
     scored.sort((x, y) => x.a.sort - y.a.sort || gOrder[x.a.group] - gOrder[y.a.group] || x.e.strength - y.e.strength || (x.a.due ?? "9").localeCompare(y.a.due ?? "9"));
@@ -451,26 +504,32 @@ export function contactWorklist(rows: LeadFact[], today: string, rules: Rules) {
       .filter((x) => x.at).sort((a, b) => b.at!.localeCompare(a.at!))[0] ?? null;
     const ia = inactivity(f, today, rules);
     const deals = leads.flatMap((l) => l.deals ?? []).filter((d, i, a) => a.findIndex((x) => x.id === d.id) === i);
-    const sqlDeal = deals.filter((d) => d.status === "open" && d.sqlDate).sort((a, b) => (b.sqlDate ?? "").localeCompare(a.sqlDate ?? ""))[0] ?? null;
-    const openDeal = sqlDeal ?? deals.find((d) => d.status === "open") ?? null;
+    const sqlD = deals.filter((d) => d.status === "open" && d.sqlDate).sort((a, b) => (b.sqlDate ?? "").localeCompare(a.sqlDate ?? ""))[0] ?? null;
+    const openDeal = sqlD ?? deals.find((d) => d.status === "open") ?? null;
     const anyMissingSql = deals.some((d) => d.status === "open" && !d.sqlDate);
     return {
       contactId: f.contactId, contactName: f.contactName, jobTitle: f.jobTitle, contactEmail: f.contactEmail,
       companyId: f.companyId, companyName: f.companyName, sdrOwnerId: f.sdrOwnerId, sdrName: f.sdrOwnerId ? rosterById.get(f.sdrOwnerId)?.name ?? null : null,
       sdrSource: f.sdrSource ?? null, allocationDate: f.allocationDate, eligibilityDate: f.eligibilityDate,
       temperature: f.temperature ?? (f.temperatureRaw || null), engagement: best.text, engagementStrength: best.strength,
+      intent: { level: intentLevel(f), raw: f.accountIntent?.level ?? null, since: f.accountIntent?.since ?? null, reason: f.accountIntent?.reason ?? null,
+        recentSignals: f.accountIntent?.recentSignals ?? null, warmAt: f.accountIntent?.warmAt ?? null, surgingAt: f.accountIntent?.surgingAt ?? null, coldAt: f.accountIntent?.coldAt ?? null,
+        sdrCategory: f.accountIntent?.sdrCategory ?? null, lifecycleCustom: f.accountIntent?.lifecycleCustom ?? null, icp: f.accountIntent?.icp ?? f.icpTier ?? null,
+        engagementScore: f.accountIntent?.engagementScore ?? null, factorsIntent: f.accountIntent?.factorsIntent ?? null,
+        synced: !!f.accountIntent },
+      lastReplyAt: f.lastReplyAt ?? null, conversation: activeConversation(f, today, rules), ownership: f.ownership ?? null, intentRank: ({ hot: 0, warm: 1, unknown: 2, cold: 3 } as const)[intentLevel(f)],
       ...top.a, eventId: f.eventId,
       yourTouches, yourTouchesSinceAllocation: sinceAlloc, sdrTouchesAny: ids.size,
       otherSdrTouches: Math.max(0, ...leads.map((l) => l.otherSdrTouches ?? 0)), lastOtherSdrTouch: other,
       lastOutboundAt: lastOut?.at ?? null, lastOutboundOwnerId: lastOut?.by ?? null, lastOutboundKind: lastOut?.kind ?? null,
       daysSinceTouch: ia.businessDays, nextTask: f.nextTaskDue ? { due: f.nextTaskDue, subject: f.nextTaskSubject ?? null, ownerId: f.nextTaskOwnerId ?? null } : null,
-      sql: sqlDeal ? "yes" : anyMissingSql || !deals.length ? "no" : "no",
+      sql: sqlD ? "yes" : "no", sqlNote: anyMissingSql ? "open deal has no Became Qualified to Buy Date" : null,
       deal: openDeal ? { name: openDeal.name, stage: openDeal.stageLabel, id: openDeal.id, via: openDeal.via, ownerId: openDeal.ownerId ?? null, sqlDate: openDeal.sqlDate ?? null } : null,
       deals,
       events: leads.map((l) => ({ id: l.eventId, name: l.eventName, date: l.eventDate, category: l.eventCategory, attendance: l.attendance })),
     };
   });
-  items.sort((a, b) => a.sort - b.sort || a.engagementStrength - b.engagementStrength || (a.temperature === "Hot" ? -1 : 0) - (b.temperature === "Hot" ? -1 : 0) || (a.due ?? "9").localeCompare(b.due ?? "9"));
+  items.sort((a, b) => a.sort - b.sort || a.intentRank - b.intentRank || a.engagementStrength - b.engagementStrength || (a.temperature === "Hot" ? -1 : 0) - (b.temperature === "Hot" ? -1 : 0) || (a.due ?? "9").localeCompare(b.due ?? "9"));
   const counts = Object.fromEntries(CONTACT_GROUPS.map((g) => [g.key, items.filter((i) => i.group === g.key).length])) as Record<ContactGroup, number>;
   return { groups: CONTACT_GROUPS, counts, items };
 }

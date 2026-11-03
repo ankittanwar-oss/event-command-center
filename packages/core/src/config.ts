@@ -76,6 +76,8 @@ export interface Rules {
   performanceColors: { coverageTarget: number; followUpTarget: number; amberFraction: number };
   /** "No touch in N business days" engagement indicator (not an SLA). */
   inactivityBusinessDays: number;
+  /** A reply or meeting counts as an active conversation only within this many calendar days (or a future meeting). */
+  conversationRecencyDays: number;
   /** Open deals in these stages (case-insensitive substring of the stage label) do NOT put a lead "in play". */
   inactiveDealStages: string[];
   /** Deals whose name matches this pattern (e.g. test records) are ignored entirely. */
@@ -130,6 +132,7 @@ export const DEFAULT_RULES: Rules = {
   slaStartDate: "2026-10-30",
   performanceColors: { coverageTarget: 80, followUpTarget: 50, amberFraction: 0.75 },
   inactivityBusinessDays: 14,
+  conversationRecencyDays: 30,
   scorecardTargets: {
     coverage: { green: 80, amber: 50, higherIsBetter: true },        // % of eligible leads touched at least once
     sla: { green: 80, amber: 60, higherIsBetter: true },             // % first touch within SLA

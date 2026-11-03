@@ -176,3 +176,40 @@ test("auto-replies are not prospect replies", () => {
   const f = computeLeadFacts(ds, R, T)[0]!;
   assert.equal(f.lastReplyAt, null); assert.notEqual(f.status, "in_play");
 });
+
+describe("conversation recency, account intent and stale snapshots", () => {
+  const NOV = "2026-11-03";
+  test("Bhavna case: 2025 meeting + Discovery deal without SQL + 0 touches -> First outreach, not In conversation", async () => {
+    const { contactAction } = await import("../src/index.js");
+    const ds = dataset({ events: [event({ date: "2026-08-12" })], companies: [company({ allocationDate: "2026-10-27" })],
+      acts: [act({ ts: "2025-03-03", kind: "MEETING", objectType: "meetings", direction: null, ownerId: AE })],
+      deals: [deal({ contactIds: [], sqlDate: null, stageLabel: "Discovery" })] });
+    const f = computeLeadFacts(ds, R, NOV)[0]!;
+    assert.notEqual(f.status, "in_play");
+    const a = contactAction(f, NOV, R);
+    assert.equal(a.group, "first_outreach"); assert.notEqual(a.action, "In conversation");
+  });
+  test("old reply is history; recent reply needs a response; future meeting is in conversation", async () => {
+    const { contactAction } = await import("../src/index.js");
+    const old = computeLeadFacts(dataset({ acts: [act({ ts: "2026-10-02" }), act({ ts: "2026-10-03", kind: "INCOMING_EMAIL", direction: "INCOMING_EMAIL", title: "Re: hi" })] }), R, NOV)[0]!;
+    assert.notEqual(contactAction(old, NOV, R).group, "respond");
+    const recent = computeLeadFacts(dataset({ acts: [act({ ts: "2026-10-28" }), act({ ts: "2026-10-30", kind: "INCOMING_EMAIL", direction: "INCOMING_EMAIL", title: "Re: hi" })] }), R, NOV)[0]!;
+    assert.equal(contactAction(recent, NOV, R).group, "respond");
+    const fut = computeLeadFacts(dataset({ acts: [act({ ts: "2026-10-28" }), act({ ts: "2026-11-10", kind: "MEETING", objectType: "meetings", direction: null })] }), R, NOV)[0]!;
+    assert.equal(contactAction(fut, NOV, R).action, "In conversation");
+  });
+  test("a stale snapshot that says 'in play' because of an unqualified deal is re-evaluated", async () => {
+    const { contactAction } = await import("../src/index.js");
+    const f = { ...computeLeadFacts(dataset(), R, NOV)[0]!, status: "in_play", inPlayReason: "Open opportunity: X (Discovery)" } as any;
+    assert.equal(contactAction(f, NOV, R).group, "first_outreach");
+  });
+  test("company intent drives priority: Cold + no engagement -> Lower priority; Warm -> First outreach", async () => {
+    const { contactAction } = await import("../src/index.js");
+    const base = computeLeadFacts(dataset(), rules({ slaStartDate: "2026-11-01" }), NOV)[0]!;
+    const intent = (level: string) => ({ level, raw: `${level} Account`, since: "2026-03-20", warmAt: null, surgingAt: null, coldAt: null, reason: null, recentSignals: null });
+    assert.equal(contactAction({ ...base, accountIntent: intent("Cold") }, NOV, R).group, "low");
+    const w = contactAction({ ...base, accountIntent: intent("Warm") }, NOV, R);
+    assert.equal(w.group, "first_outreach"); assert.equal(w.color, "amber");
+    assert.equal(contactAction({ ...base, accountIntent: null }, NOV, R).group, "first_outreach"); // unknown is not penalised
+  });
+});

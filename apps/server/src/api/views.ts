@@ -447,7 +447,9 @@ export function daily(facts: LeadFact[], q: URLSearchParams, today: string, rule
   const work = worklist(rows, today, rules);
   const cw = contactWorklist(rows, today, rules);
   const contacts = { groups: cw.groups, counts: cw.counts, total: cw.items.length,
-    items: cw.items.slice(0, 3000).map((i) => ({ ...i, lastBy: ownerLabel(i.lastOutboundOwnerId, rules), otherBy: ownerLabel(i.lastOtherSdrTouch?.ownerId ?? null, rules), dealOwner: ownerLabel(i.deal?.ownerId ?? null, rules) })) };
+    items: cw.items.slice(0, 3000).map((i) => ({ ...i,
+      own: i.ownership ? { companySdr: ownerLabel(i.ownership.companySdrId, rules), companyOwner: ownerLabel(i.ownership.companyOwnerId, rules), contactOwner: ownerLabel(i.ownership.contactOwnerId, rules), contactSdr: ownerLabel(i.ownership.contactSdrId, rules), companyCount: i.ownership.companyCount } : null,
+      lastBy: ownerLabel(i.lastOutboundOwnerId, rules), otherBy: ownerLabel(i.lastOtherSdrTouch?.ownerId ?? null, rules), dealOwner: ownerLabel(i.deal?.ownerId ?? null, rules) })) };
   return { contacts, filters: nf, groups: DAILY_GROUPS, summary: summarise(accts), bySdr, accounts: accts.slice(0, 1500), total: accts.length,
     today, work: { sections: work.sections, counts: work.counts, total: work.items.length,
       items: work.items.slice(0, 2000).map((i) => ({ ...i, lastContact: { at: i.lastOutboundAt, by: ownerLabel(i.lastOutboundOwnerId, rules), sdrAt: i.currentSdrLastTouchAt, sdr: ownerLabel(i.sdrOwnerId, rules) } })) } };

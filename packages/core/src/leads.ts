@@ -100,6 +100,7 @@ export function computeLeadFact(
   const dq: string[] = [];
   const company = contact.companyId ? ds.companies.get(contact.companyId) ?? null : null;
   if (!contact.companyId) dq.push("contact_without_company");
+  if ((contact.companyIds?.length ?? 0) > 1) dq.push("multiple_companies");
   else if (!company) dq.push("company_not_synced");
 
   const temperature = mapTemperature(company?.temperatureRaw ?? null, rules);
@@ -204,10 +205,13 @@ export function computeLeadFact(
     // without that date (e.g. Discovery in the pre-qualification pipeline) does NOT take the lead out of SDR outreach;
     // it stays as commercial context only. Closed deals (won/lost) never put a lead in play here.
     const openDeal = deals.find((d) => !d.isClosed && !!d.sqlDate && !rules.inactiveDealStages.some((x) => (d.stageLabel ?? "").toLowerCase().includes(x.toLowerCase())));
-    const meeting = contactActs.find((a) => a.kind === "MEETING" && toDate(a.timestamp)! >= eligibilityDate);
-    const reply = contactActs.find((a) => isRealReply(a) && toDate(a.timestamp)! >= eligibilityDate);
+    // A conversation is only "in play" when it is RECENT (rules.conversationRecencyDays, default 30) or a meeting is
+    // scheduled in the future. An old reply or an old meeting never keeps a lead in conversation.
+    const recentFrom = maxDay(eligibilityDate, addDays(today, -(rules.conversationRecencyDays ?? 30)))!;
+    const meeting = [...contactActs].reverse().find((a) => a.kind === "MEETING" && toDate(a.timestamp)! >= recentFrom);
+    const reply = [...contactActs].reverse().find((a) => isRealReply(a) && toDate(a.timestamp)! >= recentFrom);
     if (openDeal) inPlayReason = `Qualified (SQL ${openDeal.sqlDate}): ${openDeal.name ?? openDeal.id}${openDeal.stageLabel ? ` (${openDeal.stageLabel})` : ""}`;
-    else if (meeting) inPlayReason = `Meeting on ${toDate(meeting.timestamp)}`;
+    else if (meeting) inPlayReason = toDate(meeting.timestamp)! > today ? `Meeting scheduled ${toDate(meeting.timestamp)}` : `Meeting on ${toDate(meeting.timestamp)}`;
     else if (reply) inPlayReason = `Prospect replied on ${toDate(reply.timestamp)}`;
     else if (contact.leadStatus && rules.disqualifiedLeadStatuses.includes(contact.leadStatus.toUpperCase())) inPlayReason = "Disqualified";
   }
@@ -336,7 +340,10 @@ export function computeLeadFact(
     lastReplyAt, lastOutboundAt: lastOutbound?.timestamp ?? null, lastOutboundOwnerId: lastOutbound?.ownerId ?? null, lastOutboundKind: lastOutbound?.kind ?? null, lastMeetingAt,
     currentSdrTouchesSinceAllocation: sdr && allocationDate ? touches.filter((t) => t.ownerId === sdr && day(t) >= allocationDate).length : null,
     currentSdrTouches, otherSdrTouches, lastOtherSdrTouch, lastTouchOwnerId, currentSdrLastTouchAt,
-    nextTaskSubject: nextTask?.subject ?? null, nextTaskOwnerId: nextTask?.ownerId ?? null, slaApplies: !noSla,
+    nextTaskSubject: nextTask?.subject ?? null, nextTaskOwnerId: nextTask?.ownerId ?? null, slaApplies: !noSla, accountIntent: company?.intent === undefined ? undefined : company.intent,
+    ownership: { companySdrId: company?.sdrOwnerId ?? null, companyOwnerId: company?.hubspotOwnerId ?? null, contactOwnerId: contact.ownerId ?? null,
+      contactSdrId: contact.sdrOwnerId ?? null, companyCount: contact.companyIds?.length ?? (contact.companyId ? 1 : 0), allocationDate },
+    nextMeetingAt: contactActs.filter((a) => a.kind === "MEETING" && toDate(a.timestamp)! > today).map((a) => a.timestamp).sort()[0] ?? null,
     firstTouchSlaMet: noSla ? null : slaMet, firstTouchOverdue: noSla ? false : overdue, expectedTouches: expected,
     insufficientFollowUp: insufficient, multiWeek: weeks.size >= rules.multiWeekMinWeeks,
     nextTaskDue, hasNextStep: openTasks.length > 0 || futureMeeting,

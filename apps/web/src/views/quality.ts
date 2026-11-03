@@ -15,6 +15,7 @@ const FLAG_LABEL: Record<string, string> = {
   event_date_missing: "Event date missing",
   event_uncategorized: "Event could not be categorised",
   icp_tier_missing: "ICP tier missing",
+  multiple_companies: "Contact associated with more than one company (primary used)",
 };
 
 export async function qualityView(route: Route): Promise<HTMLElement> {

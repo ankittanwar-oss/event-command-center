@@ -6,7 +6,7 @@ import { existingIds, loadDataset, replaceLeadFacts, replaceLinks, upsert } from
 import { HubSpotClient } from "../hubspot/client.js";
 import {
   ACTIVITY_PROPERTIES, ACTIVITY_TYPES, COMPANY_PROPERTIES, CONTACT_PROPERTIES, DEAL_PROPERTIES_BASE,
-  attendedForEvent, stageInfoFromPipelines, mapActivity, mapCompany, mapContact, mapDeal, mapEvent, mapOwner, mapTask, type ActivityRow, type ActivityType,
+  attendedForEvent, stageInfoFromPipelines, mapActivity, mapCompany, mapContact, COMPANY_LABELLED, type LabelMaps, mapDeal, mapEvent, mapOwner, mapTask, type ActivityRow, type ActivityType,
 } from "../hubspot/mappers.js";
 import { loadRules } from "../rules.js";
 import { getSetting, setSetting } from "../db/repo.js";
@@ -128,9 +128,20 @@ async function syncAll(hs: HubSpotClient, rules: Rules, full: boolean, records: 
 
   // 4. Contacts
   const contacts = (await hs.batchRead("contacts", contactIds, CONTACT_PROPERTIES)).map(mapContact);
+  // Company join uses HubSpot ASSOCIATIONS, never a name match. The primary company (associatedcompanyid) is used when
+  // set; a contact with no primary but exactly one associated company uses that one; all associations are stored.
+  const contactCompanies = contactIds.length ? await hs.associations("contacts", "companies", contactIds) : new Map<string, string[]>();
+  let multiCompany = 0;
+  for (const c of contacts) {
+    const assoc = contactCompanies.get(c.id) ?? [];
+    c.company_ids = assoc;
+    if (!c.company_id && assoc.length === 1) c.company_id = assoc[0]!;
+    if (assoc.length > 1) multiCompany++;
+  }
+  if (multiCompany) warnings.push(`${multiCompany} contact(s) are associated with more than one company; the primary company is used`);
   records.contacts = await upsert(db, "contacts", [
     "id text", "first_name text", "last_name text", "email text", "job_title text", "country text", "company_id text", "lifecycle_stage text",
-    "lead_status text", "do_not_contact boolean", "attended_date date", "hubspot_owner_id text", "contact_sdr_owner_id text",
+    "lead_status text", "do_not_contact boolean", "attended_date date", "hubspot_owner_id text", "contact_sdr_owner_id text", "company_ids jsonb",
   ], contacts as any, ["id"]);
   const contactById = new Map(contacts.map((c) => [c.id, c]));
   if (contacts.length < contactIds.length) warnings.push(`${contactIds.length - contacts.length} registrant contact(s) could not be read (deleted or merged)`);
@@ -160,13 +171,18 @@ async function syncAll(hs: HubSpotClient, rules: Rules, full: boolean, records: 
   // 6. Companies (with SDR Owner history for allocation dates)
   const companyIds = [...new Set(contacts.map((c) => c.company_id).filter((x): x is string => !!x))];
   const companies: ReturnType<typeof mapCompany>[] = [];
+  const labels: LabelMaps = {};
+  for (const name of COMPANY_LABELLED) {
+    const def = await hs.property("companies", name).catch(() => null);
+    labels[name] = new Map((def?.options ?? []).map((o) => [o.value, o.label]));
+  }
   for (let i = 0; i < companyIds.length; i += 50) {
     const batch = await hs.batchRead("companies", companyIds.slice(i, i + 50), COMPANY_PROPERTIES.includes(rules.temperature.property) ? COMPANY_PROPERTIES : [...COMPANY_PROPERTIES, rules.temperature.property], ["sdr_owner"]);
-    companies.push(...batch.map((r) => mapCompany(r, rules.temperature.property)));
+    companies.push(...batch.map((r) => mapCompany(r, rules.temperature.property, labels)));
   }
   records.companies = await upsert(db, "companies", [
     "id text", "name text", "domain text", "country text", "sdr_owner_id text", "allocation_date date", "allocation_source text", "unassignment_date date",
-    "icp_tier text", "competitor_flag text", "temperature_raw text", "lifecycle_stage text", "hubspot_owner_id text", "sdr_team text", "sdr_history jsonb",
+    "icp_tier text", "competitor_flag text", "temperature_raw text", "lifecycle_stage text", "hubspot_owner_id text", "sdr_team text", "sdr_history jsonb", "intent jsonb",
   ], companies as any, ["id"]);
   const offRoster = companies.filter((c) => c.sdr_owner_id && !isRosterSdr(c.sdr_owner_id)).length;
   if (offRoster) warnings.push(`${offRoster} compan(ies) have an SDR Owner who is not on the approved roster (shown in Data Quality)`);
@@ -310,7 +326,7 @@ async function syncAll(hs: HubSpotClient, rules: Rules, full: boolean, records: 
     if (dupCompanies.length && dupDealIds.length) {
       await upsert(db, "companies", [
         "id text", "name text", "domain text", "country text", "sdr_owner_id text", "allocation_date date", "allocation_source text", "unassignment_date date",
-        "icp_tier text", "competitor_flag text", "temperature_raw text", "lifecycle_stage text", "hubspot_owner_id text", "sdr_team text", "sdr_history jsonb",
+        "icp_tier text", "competitor_flag text", "temperature_raw text", "lifecycle_stage text", "hubspot_owner_id text", "sdr_team text", "sdr_history jsonb", "intent jsonb",
       ], dupCompanies as any, ["id"]);
       const dupDeals: ReturnType<typeof mapDeal>[] = [];
       for (let i = 0; i < dupDealIds.length; i += 50) {

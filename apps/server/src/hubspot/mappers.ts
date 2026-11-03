@@ -10,7 +10,15 @@ export const CONTACT_PROPERTIES = [
 export const COMPANY_PROPERTIES = [
   "name", "domain", "country", "sdr_owner", "allocation_date", "date_of_unassignment", "icp_category_20",
   "competitor_check__clay", "event_leads___cold_warm_surging_hot", "lifecyclestage", "hubspot_owner_id", "team___sdr_company",
+  // Current account intent (company level; fluid): Account Intent Level + the dates the company entered each stage.
+  "account_type", "date_entered__warm_stage_", "date_entered__surging_stage_", "date_entered__cold_stage_",
+  "latest_clay_signal_reason", "hs_recent_intent_signals",
+  // Account context shown with intent: TAGS- SDR Categories, Lifecycle Stage (Custom), Total Engagement Score, Factors Intent Level.
+  "newtags___sdr", "tam_bucket", "total_engagement_score", "unify_intent_level",
 ];
+/** Company dropdowns whose option LABELS are shown (the API returns internal values). */
+export const COMPANY_LABELLED = ["account_type", "newtags___sdr", "tam_bucket", "icp_category_20", "unify_intent_level"] as const;
+export type LabelMaps = Record<string, Map<string, string>>;
 
 export const ACTIVITY_TYPES = ["emails", "calls", "meetings", "communications", "tasks"] as const;
 export type ActivityType = (typeof ACTIVITY_TYPES)[number];
@@ -57,13 +65,28 @@ export interface CompanyRow {
   id: string; name: string | null; domain: string | null; country: string | null;
   sdr_owner_id: string | null; allocation_date: string | null; allocation_source: string | null; unassignment_date: string | null;
   icp_tier: string | null; competitor_flag: string | null; temperature_raw: string | null; lifecycle_stage: string | null;
-  hubspot_owner_id: string | null; sdr_team: string | null; sdr_history: unknown;
+  hubspot_owner_id: string | null; sdr_team: string | null; sdr_history: unknown; intent: unknown;
 }
 /**
  * Allocation date: the "Allocation date" property when present; otherwise the timestamp at which the current
  * SDR Owner value was set (property history), flagged as allocation_source = 'history'.
  */
-export function mapCompany(r: any, temperatureProperty = "event_leads___cold_warm_surging_hot"): CompanyRow {
+/** Account intent exactly as recorded in HubSpot. Nothing is inferred: missing values stay null. */
+export function mapIntent(p: Record<string, unknown>, labels: LabelMaps = {}) {
+  const lab = (k: string) => { const v = s(p[k]); return v ? labels[k]?.get(v) ?? v : null; };
+  const raw = lab("account_type");
+  const level = raw ? raw.replace(/\s*account$/i, "").trim() : null; // "Warm Account" -> "Warm"
+  const warmAt = hsDate(p.date_entered__warm_stage_), surgingAt = hsDate(p.date_entered__surging_stage_), coldAt = hsDate(p.date_entered__cold_stage_);
+  const since = level && /^surging/i.test(level) ? surgingAt : level && /^warm/i.test(level) ? warmAt : level && /^cold/i.test(level) ? coldAt : null;
+  const score = s(p.total_engagement_score);
+  return {
+    level, raw, since, warmAt, surgingAt, coldAt, reason: s(p.latest_clay_signal_reason), recentSignals: s(p.hs_recent_intent_signals),
+    sdrCategory: lab("newtags___sdr"), lifecycleCustom: lab("tam_bucket"), icp: lab("icp_category_20"),
+    engagementScore: score !== null && !Number.isNaN(Number(score)) ? Number(score) : null, factorsIntent: lab("unify_intent_level"),
+  };
+}
+
+export function mapCompany(r: any, temperatureProperty = "event_leads___cold_warm_surging_hot", labels: LabelMaps = {}): CompanyRow {
   const p = r.properties ?? {};
   const sdr = s(p.sdr_owner);
   let allocation = hsDate(p.allocation_date);
@@ -79,13 +102,14 @@ export function mapCompany(r: any, temperatureProperty = "event_leads___cold_war
     icp_tier: s(p.icp_category_20), competitor_flag: s(p.competitor_check__clay), temperature_raw: s(p[temperatureProperty]),
     lifecycle_stage: s(p.lifecyclestage), hubspot_owner_id: s(p.hubspot_owner_id), sdr_team: s(p.team___sdr_company),
     sdr_history: history ? history.slice(0, 20).map((h) => ({ value: h.value, timestamp: h.timestamp, sourceType: h.sourceType })) : null,
+    intent: mapIntent(p, labels),
   };
 }
 
 export interface ContactRow {
   id: string; first_name: string | null; last_name: string | null; email: string | null; job_title: string | null; country: string | null;
   company_id: string | null; lifecycle_stage: string | null; lead_status: string | null; do_not_contact: boolean; attended_date: string | null;
-  hubspot_owner_id: string | null; contact_sdr_owner_id: string | null;
+  hubspot_owner_id: string | null; contact_sdr_owner_id: string | null; company_ids?: string[] | null;
 }
 export function mapContact(r: any): ContactRow {
   const p = r.properties ?? {};

@@ -540,3 +540,8 @@ details.moresec > summary { cursor: pointer; font-weight: 600; padding: 8px 0; o
 .ctime { font-weight: 500; opacity: .75; }
 .crow2 { grid-template-columns: 8px minmax(0, 1.6fr) minmax(0, 2fr) minmax(0, 1.3fr); }
 @media (max-width: 700px) { .drawer { width: 100vw; } .cdrawer .kv { grid-template-columns: 1fr; } .actline { grid-template-columns: 60px 70px minmax(0, 1fr); } .actline > :last-child { grid-column: 1 / -1; } }
+.ipill { display: inline-block; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 9px; border: 1px solid #d0d5dd; color: #475467; }
+.ipill.i-hot { background: #fee4e2; color: #b42318; border-color: #fecdca; } .ipill.i-warm { background: #fef0c7; color: #93370d; border-color: #fedf89; }
+.ipill.i-cold { background: #eef4ff; color: #3538cd; border-color: #c7d7fe; } .ipill.i-unknown { background: transparent; color: #667085; border-style: dashed; }
+.cl1 .faint { font-size: 12px; }
+@media (prefers-color-scheme: dark) { .ipill.i-hot { background: #4a1714; color: #fda29b; } .ipill.i-warm { background: #4a3510; color: #fec84b; } .ipill.i-cold { background: #1f2a4d; color: #a4bcfd; } }

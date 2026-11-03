@@ -12,6 +12,21 @@ const PAGE = 100;
 
 const firstName = (n: string | null | undefined) => (n ?? "").split(" ")[0];
 const today = () => new Date().toISOString().slice(0, 10);
+/** Company intent pill: current HubSpot Account Intent Level, never the event-lead label. */
+const intentPill = (it: any) => {
+  const lv = it?.level ?? "unknown";
+  const txt = !it?.synced ? "Intent: not synced" : lv === "unknown" ? "Intent: unknown" : `${lv === "hot" ? "Surging" : lv[0].toUpperCase() + lv.slice(1)}`;
+  return h("span", { class: `ipill i-${it?.synced ? lv : "unknown"}`, title: it?.raw ? `Account Intent Level: ${it.raw}${it.since ? ` since ${it.since}` : ""}` : "No Account Intent Level recorded for this company" }, txt);
+};
+const intentWhy = (it: any) => {
+  if (!it?.synced) return "Account intent not yet synced";
+  const parts = [
+    it.level === "unknown" ? "No Account Intent Level" : it.since ? `since ${fmt.day(it.since)}` : null,
+    it.sdrCategory, it.icp,
+    it.reason ? it.reason : it.recentSignals ? `signals: ${it.recentSignals}` : it.level !== "unknown" ? "detailed trigger not recorded" : null,
+  ];
+  return parts.filter(Boolean).join(" · ");
+};
 const who = (o: any) => (o ? `${o.name ?? "Unknown user"}${o.role ? ` (${o.role})` : ""}` : null);
 
 export async function dailyView(route: Route, meta: any): Promise<HTMLElement> {
@@ -36,7 +51,7 @@ export async function dailyView(route: Route, meta: any): Promise<HTMLElement> {
   const tabs = h("div", { class: "gtabs" },
     groups.filter((g) => ACTION_GROUPS.includes(g.key)).map((g) => tab(g.key, g.label, g.hint)),
     h("span", { class: "gsep" }),
-    ["review", "progress"].map((k) => { const g = groups.find((y) => y.key === k); return g ? tab(g.key, g.label, g.hint) : null; }));
+    ["low", "review", "progress"].map((k) => { const g = groups.find((y) => y.key === k); return g ? tab(g.key, g.label, g.hint) : null; }));
 
   // ---- controls
   const search = h("input", { type: "search", placeholder: "Search company, contact, title, event", value: x.get("q") ?? "" }) as HTMLInputElement;
@@ -60,10 +75,10 @@ export async function dailyView(route: Route, meta: any): Promise<HTMLElement> {
         h("div", { class: "cact" }, i.action, timing ? h("span", { class: "ctime" }, ` · ${timing}`) : null),
         h("div", { class: "cwhy" }, i.reason)),
       h("div", { class: "cwho" },
-        h("div", { class: "cl1" }, h("b", null, i.companyName ?? "(no company)"), " · ", i.contactName, i.jobTitle ? h("span", { class: "faint" }, ` · ${i.jobTitle}`) : null),
-        h("div", { class: "cl2" }, tempPill(i.temperature), " ", i.engagement)),
+        h("div", { class: "cl1" }, h("b", null, i.companyName ?? "(no company)"), " ", intentPill(i.intent), h("span", { class: "faint" }, ` ${intentWhy(i.intent)}`)),
+        h("div", { class: "cl2" }, i.contactName, i.jobTitle ? ` · ${i.jobTitle}` : "", " · ", i.engagement)),
       h("div", { class: "cmeta2" },
-        h("div", null, !f.sdr ? `${i.sdrName ?? "No SDR"} · ` : "", touches || `0 since allocation`),
+        h("div", null, !f.sdr ? `${i.sdrName ?? "No SDR"} · ` : "", touches || `0 by ${firstName(i.sdrName) || "SDR"}`),
         h("div", { class: "faint", title: "Last outbound contact by anyone (SDR, AE or other)" }, `Last: ${last}`)));
   };
 
@@ -105,27 +120,52 @@ async function details(i: any) {
   const more = (t: string, ...c: any[]) => h("details", { class: "dmore" }, h("summary", null, t), ...c);
   const kindTxt = (k: string | null) => (k ? ({ EMAIL: "email", CALL: "call", MEETING: "meeting", LINKEDIN: "LinkedIn" } as Record<string, string>)[k] ?? k.toLowerCase() : null);
   const sqlTxt = i.deal?.sqlDate ? `Yes · qualified ${fmt.day(i.deal.sqlDate)}` : i.deal ? "No · the open deal has no Became Qualified to Buy Date" : "No · no open deal";
+  const it = i.intent ?? {};
   box.append(
-    // A. Next action
     h("div", { class: `nextbox c-${i.color}` },
       h("div", { class: "na" }, i.action), h("div", { class: "nr" }, i.reason),
       h("div", { class: "faint" }, [i.due ? `Due ${fmt.day(i.due)}` : null, `SDR: ${i.sdrName ?? "not assigned"}${i.sdrSource === "pod_ae" ? " (via AE pod)" : ""}`, i.allocationDate ? `allocated ${fmt.day(i.allocationDate)}` : null].filter(Boolean).join(" · ")),
-      h("div", { class: "faint" }, "Why this contact: ", i.engagement),
       h("div", { class: "nlinks" }, hsLink("contact", i.contactId, "Contact in HubSpot ↗"), " ", hsLink("company", i.companyId, "Company ↗"), i.contactEmail ? h("span", { class: "faint" }, ` · ${i.contactEmail}`) : null)),
-    // B. Outreach history
-    sec("Outreach history", h("div", { class: "kv tight" },
+    // 1. ACCOUNT INTENT (company level, current)
+    sec("Account intent · company", h("div", { class: "kv tight" },
+      kv("Current level", [intentPill(it), it.raw ? h("span", { class: "faint" }, ` ${it.raw}`) : null]),
+      kv("Since", it.since ? fmt.day(it.since) : it.synced && it.level !== "unknown" ? "Date not recorded" : null),
+      kv("SDR signal category", it.sdrCategory ?? (it.synced ? "Not set" : null)),
+      kv("Detailed trigger", it.synced ? (it.reason ?? "Not recorded in HubSpot (the category above is the only signal context)") : "Not yet synced"),
+      kv("ICP tier", it.icp),
+      kv("Lifecycle stage (custom)", it.lifecycleCustom),
+      kv("Total engagement score", it.engagementScore !== null && it.engagementScore !== undefined ? `${it.engagementScore} (supporting only)` : null),
+      kv("Factors intent", it.synced ? (it.factorsIntent ?? "Not populated") : null),
+      kv("Recent signals (30 days)", it.recentSignals),
+      kv("History", [it.coldAt ? `Cold ${fmt.day(it.coldAt)}` : null, it.warmAt ? `Warm ${fmt.day(it.warmAt)}` : null, it.surgingAt ? `Surging ${fmt.day(it.surgingAt)}` : null].filter(Boolean).join(" → ") || null),
+      kv("Source", "HubSpot company: Account Intent Level (account_type) and Date entered Cold/Warm/Surging Stage"),
+      kv("Event-lead label", i.temperature ? `${i.temperature} (event classification, kept separate from current intent)` : null))),
+    sec("Ownership", h("div", { class: "kv tight" },
+      kv("Assigned SDR (used here)", `${i.sdrName ?? "Not assigned"}${i.sdrSource === "pod_ae" ? " (via the company AE's pod)" : ""}`),
+      kv("Company SDR owner", who(i.own?.companySdr) ?? "Not set"),
+      kv("Company owner (AE)", who(i.own?.companyOwner) ?? "Not set"),
+      kv("Contact owner", who(i.own?.contactOwner) ?? "Not set"),
+      kv("Contact SDR field", who(i.own?.contactSdr) ?? "Not set"),
+      kv("Company allocation date", i.allocationDate ? fmt.day(i.allocationDate) : "Not recorded"),
+      kv("Associated companies", i.own ? (i.own.companyCount > 1 ? `${i.own.companyCount} (primary company used)` : String(i.own.companyCount)) : null))),
+    // 2. CONTACT ENGAGEMENT
+    sec("Contact engagement", h("div", { class: "kv tight" },
+      kv("Event engagement", i.engagement),
+      kv("Active conversation", i.conversation ?? "None in the last 30 days"),
       kv("Last contacted", i.lastOutboundAt ? `${fmt.day(i.lastOutboundAt)} · ${who(i.lastBy) ?? "owner not recorded"}${kindTxt(i.lastOutboundKind) ? ` · ${kindTxt(i.lastOutboundKind)}` : ""}` : "Not contacted yet"),
+      kv("Last prospect reply", i.lastReplyAt ? fmt.day(i.lastReplyAt) : "None recorded"),
       kv(`${firstName(i.sdrName) || "SDR"}'s touches`, `${i.yourTouches} since the event${i.yourTouchesSinceAllocation !== null && i.yourTouchesSinceAllocation !== i.yourTouches ? ` · ${i.yourTouchesSinceAllocation} since allocation (${fmt.day(i.allocationDate)})` : ""}`),
-      kv("Earlier SDR activity", i.otherSdrTouches ? `${i.otherSdrTouches} touch${i.otherSdrTouches === 1 ? "" : "es"} by ${who(i.otherBy) ?? "another SDR"}${i.lastOtherSdrTouch ? `, last ${fmt.day(i.lastOtherSdrTouch.at)}` : ""} (not credited)` : null),
+      kv("Previous SDR outreach", i.otherSdrTouches ? `${i.otherSdrTouches} touch${i.otherSdrTouches === 1 ? "" : "es"} by ${who(i.otherBy) ?? "another SDR"}${i.lastOtherSdrTouch ? `, last ${fmt.day(i.lastOtherSdrTouch.at)}` : ""} (not credited)` : "None"),
       kv("Open task", i.nextTask ? `${i.nextTask.subject ?? "HubSpot task"} · due ${fmt.day(i.nextTask.due)}` : "None")),
       h("div", { class: "histbox" }, h("div", { class: "faint" }, "Loading recent activity…"))),
-    // C. Qualification and deal status
-    sec("Qualification & deal", h("div", { class: "kv tight" },
+    // 3. DEAL QUALIFICATION
+    sec("Deal qualification", h("div", { class: "kv tight" },
       kv("SQL", sqlTxt),
-      i.deal ? kv("Deal", [i.deal.name ?? `Deal ${i.deal.id}`, " ", hsLink("deal", i.deal.id, "↗")]) : null,
+      i.deal ? kv("Relevant deal", [i.deal.name ?? `Deal ${i.deal.id}`, " ", hsLink("deal", i.deal.id, "↗")]) : null,
       i.deal ? kv("Stage", i.deal.stage ?? "–") : null,
       i.deal ? kv("AE / deal owner", who(i.dealOwner) ?? "Not available") : null,
-      i.deal ? kv("Associated with", i.deal.via === "contact" ? "This contact" : "The company only (contact may not be involved)") : null)),
+      i.deal ? kv("Associated with", i.deal.via === "contact" ? "This contact" : "The company only (contact may not be involved)") : null,
+      i.deal ? kv("Documented next step", "Not synced from HubSpot") : null)),
     more(`Events (${i.events.length})`, h("div", null, i.events.map((e: any) =>
       h("div", { class: "evline" }, h("span", { class: "link", onclick: () => openLead(e.id, i.contactId) }, e.name), h("span", { class: "faint" }, ` · ${fmt.day(e.date)} · ${e.category} · ${e.attendance === "attended" ? "attended" : e.attendance === "no_show" ? "no-show" : "attendance not recorded"}`))))),
     ...(i.deals?.length ? [more(`All deals (${i.deals.length})`, h("div", { class: "tbl-scroll" }, dealTable(i.deals)))] : []));

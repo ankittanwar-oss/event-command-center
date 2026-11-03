@@ -29,6 +29,22 @@ export interface Company {
   temperatureRaw: string | null;      // Company property "Event Leads - Cold/Warm/Surging/Hot"
   lifecycleStage: string | null;
   hubspotOwnerId?: string | null;     // company owner (AE) – used for pod-based SDR routing only
+  intent?: AccountIntent | null;      // current company-level account intent (separate from the event-lead temperature)
+}
+
+/** Company-level buying intent from HubSpot "Account Intent Level" (account_type). Fluid; dates show when it changed. */
+export interface AccountIntent {
+  level: string | null;               // "Surging" | "Warm" | "Cold" | other value as recorded
+  raw: string | null;
+  since: string | null;               // date the company entered its current level
+  warmAt: string | null; surgingAt: string | null; coldAt: string | null;
+  reason: string | null;              // Latest Clay Signal Reason (as recorded)
+  recentSignals: string | null;       // HubSpot Recent Intent Signals (rolling 30 days)
+  sdrCategory?: string | null;        // TAGS- SDR Categories (newtags___sdr)
+  lifecycleCustom?: string | null;    // Lifecycle Stage (Custom) (tam_bucket)
+  icp?: string | null;                // ICP Category 2.0 (label)
+  engagementScore?: number | null;    // Total Engagement Score (supporting only)
+  factorsIntent?: string | null;      // Factors Intent Level (unify_intent_level)
 }
 
 export interface Contact {
@@ -43,6 +59,9 @@ export interface Contact {
   leadStatus: string | null;
   doNotContact: boolean;
   attendedDate: string | null;        // Contact property "Date Engaged 'Event Attended Date'" (single value, overwritten by later events)
+  companyIds?: string[];              // every associated company (HubSpot associations); companyId is the primary
+  ownerId?: string | null;            // contact owner (hubspot_owner_id)
+  sdrOwnerId?: string | null;         // contact-level SDR field (sdr_from_company)
 }
 
 export interface EventRecord {
@@ -232,6 +251,10 @@ export interface LeadFact {
   nextTaskSubject?: string | null;
   nextTaskOwnerId?: string | null;
   slaApplies?: boolean;
+  accountIntent?: AccountIntent | null;
+  nextMeetingAt?: string | null;
+  /** Ownership as recorded on each record (for reconciliation; the SDR used everywhere is sdrOwnerId). */
+  ownership?: { companySdrId: string | null; companyOwnerId: string | null; contactOwnerId: string | null; contactSdrId: string | null; companyCount: number; allocationDate: string | null };        // a scheduled meeting in the future (verified commitment)
   dataQuality: string[];
   priority: number;                   // higher = more urgent
 }
