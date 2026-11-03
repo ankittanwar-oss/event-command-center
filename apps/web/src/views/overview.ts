@@ -183,8 +183,9 @@ export async function overviewView(route: Route): Promise<HTMLElement> {
     const leads = dp?.measuredLeads ?? 0;
     const reached = leads - (dp?.bands?.b0 ?? 0);
     const followed = reached - (dp?.bands?.b1 ?? 0);
-    const met = (r.hotSla?.met ?? 0) + (r.warmSla?.met ?? 0), dec = (r.hotSla?.decided ?? 0) + (r.warmSla?.decided ?? 0);
-    return { r, leads, reached, followed, met, dec, overdue: (sr(r.ownerId)?.hotOverdue ?? 0) + (sr(r.ownerId)?.warmOverdue ?? 0) };
+    // All temperatures (Hot, Warm, Cold, not set), so each cell matches the list it opens.
+    const met = r.allSla?.met ?? 0, dec = r.allSla?.decided ?? 0;
+    return { r, leads, reached, followed, met, dec, overdue: r.allOverdue ?? 0 };
   }).filter((x: any) => x.leads > 0).sort((a: any, b: any) => b.overdue - a.overdue || (pc(a.reached, a.leads) ?? 0) - (pc(b.reached, b.leads) ?? 0));
   // Each cell: big count, small "of N" underneath. Colour = how that count compares with target.
   const cell = (key: string, v: number | null, big: string, small: string, tip: string, bucket: string, ownerId: string) =>
