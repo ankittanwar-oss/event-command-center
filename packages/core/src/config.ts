@@ -64,6 +64,8 @@ export interface Rules {
   excludedCompanies: string[];
   /** Only Hot/Warm leads are eligible when true. When false every temperature is eligible and temperature is shown, not filtered. */
   requireHotWarm: boolean;
+  /** Events dated before this day (YYYY-MM-DD) are hidden from every view and count. null = keep all. Undated events are kept. */
+  minEventDate: string | null;
   /** Pod routing: company owner (AE) id -> pod SDR id. If the company's SDR Owner is not one of these pod SDRs, the pod SDR owns it. */
   podAeToSdr: Record<string, string>;
   /** CMO scorecard thresholds: [green at or better than, amber at or better than]; worse is red. */
@@ -118,6 +120,7 @@ export const DEFAULT_RULES: Rules = {
   roundtableSheet: { authoritative: true },
   excludedCompanies: ["The Channel Company"],
   requireHotWarm: false,
+  minEventDate: "2026-08-01",
   scorecardTargets: {
     coverage: { green: 80, amber: 50, higherIsBetter: true },        // % of eligible leads touched at least once
     sla: { green: 80, amber: 60, higherIsBetter: true },             // % first touch within SLA

@@ -311,11 +311,18 @@ export function computeLeadFact(
 }
 
 /** True when the lead's company is on the admin exclusion list (by HubSpot company id or normalised name). */
-export function isExcludedCompany(f: Pick<LeadFact, "companyId" | "companyName">, rules: Rules): boolean {
+export function isExcludedCompany(f: Pick<LeadFact, "companyId" | "companyName"> & { eventDate?: string | null }, rules: Rules): boolean {
+  if (isBeforeCutoff(f.eventDate, rules)) return true;
   const list = rules.excludedCompanies ?? [];
   if (!list.length) return false;
   const name = normalizeCompanyName(f.companyName);
   return list.some((x) => (f.companyId && x.trim() === f.companyId) || (!!name && normalizeCompanyName(x) === name));
+}
+
+/** True when the event is dated before the admin cut-off (rules.minEventDate). Undated events are kept. */
+export function isBeforeCutoff(eventDate: string | null | undefined, rules: Rules): boolean {
+  const min = rules.minEventDate;
+  return !!min && !!eventDate && eventDate.slice(0, 10) < min;
 }
 
 /** Normalised company name for duplicate-record matching ("The Channel Company, Inc." -> "channel company"). */
