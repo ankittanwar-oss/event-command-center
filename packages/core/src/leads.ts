@@ -100,9 +100,16 @@ export function computeLeadFact(
   if (company && !company.temperatureRaw) dq.push("temperature_missing");
   if (company?.temperatureRaw && !temperature && !["cold"].includes(company.temperatureRaw.toLowerCase())) dq.push("temperature_unmapped_value");
 
-  const sdrRaw = company?.sdrOwnerId ?? null;
+  // SDR: the company SDR Owner. Pod routing: if the company's AE owner belongs to a pod and the SDR Owner is not one of
+  // the pod SDRs (empty, the outreach pseudo-SDR, or anyone else), the pod's SDR owns the account.
+  const companySdr = company?.sdrOwnerId ?? null;
+  const podMap = rules.podAeToSdr ?? {};
+  const podSdrs = new Set(Object.values(podMap));
+  const podSdr = company?.hubspotOwnerId ? podMap[company.hubspotOwnerId] ?? null : null;
+  const viaPod = !!podSdr && !(companySdr && podSdrs.has(companySdr));
+  const sdrRaw = viaPod ? podSdr : companySdr;
   const sdr = isRosterSdr(sdrRaw) ? sdrRaw : null;
-  if (company && !sdrRaw) dq.push("sdr_missing");
+  if (company && !companySdr && !viaPod) dq.push("sdr_missing");
   else if (sdrRaw && !sdr) dq.push("sdr_not_on_roster");
 
   const allocationDate = toDate(company?.allocationDate ?? null);
@@ -142,7 +149,7 @@ export function computeLeadFact(
   else if (isCompetitor) reason = "Competitor";
   else if (isCustomer) reason = "Existing customer";
   else if (contact.doNotContact) reason = "Do not contact";
-  else if (!temperature) reason = company.temperatureRaw ? `Lead temperature is ${company.temperatureRaw}` : "Lead temperature not set";
+  else if (rules.requireHotWarm !== false && !temperature) reason = company.temperatureRaw ? `Lead temperature is ${company.temperatureRaw}` : "Lead temperature not set";
   else if (!tier) reason = "ICP tier missing";
   else if (!rules.eligibleIcpTiers.includes(tier)) reason = `Not targetable or workable (${tier})`;
   else if (!sdr) reason = sdrRaw ? "SDR not on approved roster" : "No SDR assigned";
@@ -239,7 +246,7 @@ export function computeLeadFact(
   const icpPriority = !!tier && PRIORITY_TIERS.has(tier);
   let priority = 0;
   if (eligible) {
-    priority += temperature === "Hot" ? 100 : 50;
+    priority += temperature === "Hot" ? 100 : temperature === "Warm" ? 50 : 20;
     if (status === "never_worked") priority += overdue ? 80 : 30;
     if (status === "stalled") priority += 60;
     if (status === "first_touch" && insufficient) priority += 40;
@@ -279,7 +286,7 @@ export function computeLeadFact(
     eventName: ev.name, eventDate: ev.date, eventCategory: ev.category, fiscalQuarter: ev.date ? fiscalQuarterOf(ev.date).key : null,
     contactName: name, contactEmail: contact.email, jobTitle: contact.jobTitle, companyName: company?.name ?? null,
     icpTier: tier, temperature, temperatureRaw: company?.temperatureRaw ?? null,
-    sdrOwnerId: sdr, sdrOwnerRaw: sdrRaw, sdrRegion: sdrRegion(sdr),
+    sdrOwnerId: sdr, sdrOwnerRaw: sdrRaw, sdrRegion: sdrRegion(sdr), sdrSource: sdr ? (viaPod ? "pod_ae" : "company") : null,
     registered: true, attendance, eligible, ineligibleReason: reason,
     allocationDate, eligibilityDate, ageDays,
     firstTouchAt, lastTouchAt,

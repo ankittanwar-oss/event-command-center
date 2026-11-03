@@ -62,6 +62,10 @@ export interface Rules {
   roundtableSheet: { authoritative: boolean };
   /** Companies hidden from every view and count: HubSpot company ids or company names (name match ignores Inc/LLC/"The"). */
   excludedCompanies: string[];
+  /** Only Hot/Warm leads are eligible when true. When false every temperature is eligible and temperature is shown, not filtered. */
+  requireHotWarm: boolean;
+  /** Pod routing: company owner (AE) id -> pod SDR id. If the company's SDR Owner is not one of these pod SDRs, the pod SDR owns it. */
+  podAeToSdr: Record<string, string>;
   /** Open deals in these stages (case-insensitive substring of the stage label) do NOT put a lead "in play". */
   inactiveDealStages: string[];
   /** Deals whose name matches this pattern (e.g. test records) are ignored entirely. */
@@ -111,6 +115,16 @@ export const DEFAULT_RULES: Rules = {
   touchTarget: { minimum: 6, bandMax: 7, windowDays: null },
   roundtableSheet: { authoritative: true },
   excludedCompanies: ["The Channel Company"],
+  requireHotWarm: false,
+  podAeToSdr: {
+    "79976078": "87607260",   // Allison Green   -> Bobbi Bukovac
+    "95421364": "92977365",   // Andrew Ketler   -> Danielle Shannon
+    "97858519": "101731640",  // Andrew Lomanto  -> Adam Myers
+    "101025397": "102138930", // Myla Cox        -> Timothy Pierce
+    "95241225": "97411438",   // Aditya Deepak   -> Jonathan Hurt
+    "1936367598": "97411438", // John Manackal   -> Jonathan Hurt
+    // Jody Walker's new AE: add "<AE owner id>": "97411405" under Admin -> Business rules
+  },
   inactiveDealStages: ["not qualified", "disqualified", "no show", "closed lost"],
   ignoredDealNamePattern: "^test\\b",
   staleAfterHours: 5,

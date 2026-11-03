@@ -26,7 +26,8 @@ export async function overviewView(route: Route): Promise<HTMLElement> {
   const sdrName = f.sdr ? d.sdrs.find((x: any) => x.ownerId === f.sdr)?.name ?? null : null;
   const hm = (t: any) => ({ eligible: t.eligible, multi: t.multiTouch?.count ?? 0, one: t.oneTouch?.count ?? 0, none: t.untouched?.count ?? 0 });
   const H = hm(d.hot), W = hm(d.warm);
-  const T = { eligible: H.eligible + W.eligible, multi: H.multi + W.multi, one: H.one + W.one, none: H.none + W.none };
+  const A = d.allTemps;
+  const T = A ? { eligible: A.eligible, multi: A.multiTouch, one: A.oneTouch, none: A.untouched } : { eligible: H.eligible + W.eligible, multi: H.multi + W.multi, one: H.one + W.one, none: H.none + W.none };
   const pctTxt = (n: number, of: number) => (of ? `${Math.round((n / of) * 100)}%` : "–");
   const depthCol = (label: string, x: typeof T, temp?: "Hot" | "Warm") => {
     const p = temp ? { temperature: temp } : {};
@@ -43,7 +44,7 @@ export async function overviewView(route: Route): Promise<HTMLElement> {
   const depthHead = h("div", { class: "card dh" },
     h("div", { class: "hd" }, h("span", { class: "t" }, sdrName ? `${sdrName}: follow-up depth` : "Follow-up depth"),
       h("span", { class: "muted", style: "margin-left:auto" }, "Qualifying SDR touches since each lead became eligible · click a number for the leads")),
-    h("div", { class: "dh-grid" }, depthCol("Hot", H, "Hot"), depthCol("Warm", W, "Warm"), depthCol("All", T)));
+    h("div", { class: "dh-grid" }, depthCol("Hot", H, "Hot"), depthCol("Warm", W, "Warm"), depthCol(A?.otherTemps ? `All (incl. ${A.otherTemps} Cold / not set)` : "All", T)));
 
   // ---- 2. Health summary (mutually exclusive; totals reconcile to eligible)
   const tile = (level: Risk) => h("button", { class: `htile ${RISK[level].cls}`, onclick: () => open(`risk_${level}`, {}, `${RISK[level].label} leads`), title: LEVEL_HINT[level] },

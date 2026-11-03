@@ -120,6 +120,13 @@ export function overview(facts: LeadFact[], q: URLSearchParams, today: string, r
       attention: rows.filter(BUCKETS.attention).length,
     },
     comparison: current && previous ? { current, previous } : null,
+    allTemps: {
+      eligible: rows.filter((f) => f.eligible).length,
+      multiTouch: rows.filter((f) => f.eligible && f.touchesSinceEligibility >= 2).length,
+      oneTouch: rows.filter((f) => f.eligible && f.touchesSinceEligibility === 1).length,
+      untouched: rows.filter((f) => f.eligible && f.touchesSinceEligibility === 0).length,
+      otherTemps: rows.filter((f) => f.eligible && !f.temperature).length,
+    },
     risk: {
       all: riskCounts(rows, rules),
       Hot: riskCounts(rows.filter((f) => f.temperature === "Hot"), rules),
@@ -293,7 +300,7 @@ export function daily(facts: LeadFact[], q: URLSearchParams, today: string, rule
     const risks = leads.map((l) => riskOf(l, rules)?.level ?? null);
     const touchedLeads = leads.filter((l) => l.touchesSinceEligibility > 0);
     const daysToFirst = touchedLeads.map((l) => l.businessDaysToFirstTouch).filter((x): x is number => x !== null);
-    const slaDays = rules.cadence[a.temperature as "Hot" | "Warm"].firstTouchBusinessDays;
+    const slaDays = rules.cadence[a.temperature === "Hot" ? "Hot" : "Warm"].firstTouchBusinessDays;
     let group: (typeof DAILY_GROUPS)[number]["key"];
     if (lastReply && (!lastTouch || day(lastTouch)! < lastReply)) group = "respond";
     else if (!firstTouch && leads.some((l) => l.status === "never_worked" && l.firstTouchOverdue)) group = "overdue";

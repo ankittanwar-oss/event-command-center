@@ -77,7 +77,7 @@ export async function loadDataset(db: Q = getPool()): Promise<Dataset> {
     const c: Company = {
       id: r.id, name: r.name, domain: r.domain, country: r.country, sdrOwnerId: r.sdr_owner_id, allocationDate: d(r.allocation_date),
       allocationSource: r.allocation_source, unassignmentDate: d(r.unassignment_date), icpTier: r.icp_tier, competitorFlag: r.competitor_flag,
-      temperatureRaw: r.temperature_raw, lifecycleStage: r.lifecycle_stage,
+      temperatureRaw: r.temperature_raw, lifecycleStage: r.lifecycle_stage, hubspotOwnerId: r.hubspot_owner_id ?? null,
     };
     ds.companies.set(c.id, c);
   }

@@ -28,6 +28,7 @@ export interface Company {
   competitorFlag: string | null;      // Company property "Competitor check (clay)"
   temperatureRaw: string | null;      // Company property "Event Leads - Cold/Warm/Surging/Hot"
   lifecycleStage: string | null;
+  hubspotOwnerId?: string | null;     // company owner (AE) – used for pod-based SDR routing only
 }
 
 export interface Contact {
@@ -164,6 +165,8 @@ export interface LeadFact {
   sdrOwnerId: string | null;          // roster SDR only; null when unmapped
   sdrOwnerRaw: string | null;
   sdrRegion: Region | null;
+  /** How the SDR was determined: the company SDR Owner, or the pod SDR of the company's AE owner. */
+  sdrSource?: "company" | "pod_ae" | null;
   registered: true;
   attendance: AttendanceStatus;
   eligible: boolean;

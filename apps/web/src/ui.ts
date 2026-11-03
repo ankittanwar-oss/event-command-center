@@ -54,7 +54,10 @@ export function statusPill(status: string, label: string, risk?: string | null) 
   const cls = risk ? ({ critical: "bad", at_risk: "warnr", healthy: "good", neutral: "" } as Record<string, string>)[risk] ?? "" : STATUS_CLASS[status] ?? "";
   return h("span", { class: `pill ${cls}` }, label);
 }
-export function tempPill(t: string | null) { return t ? h("span", { class: `pill ${t === "Hot" ? "hot" : "warm"}` }, t) : h("span", { class: "faint" }, "–"); }
+export function tempPill(t: string | null, raw?: string | null) {
+  const v = t ?? raw ?? null;
+  return v ? h("span", { class: `pill ${v === "Hot" ? "hot" : v === "Warm" ? "warm" : "cold"}` }, v) : h("span", { class: "pill cold" }, "Temp not set");
+}
 
 let portalId = "7712708";
 export function setPortal(id: string) { portalId = id; }

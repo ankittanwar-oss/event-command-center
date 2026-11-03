@@ -32,7 +32,7 @@ describe("risk levels reuse existing statuses and thresholds", () => {
     assert.equal(riskOf(one(dataset({ deals: [deal()] })), R)!.level, "neutral");
     assert.equal(riskOf(one(dataset({ deals: [deal()], acts: [act({ ts: "2026-10-02" })] })), R)!.level, "healthy");
     assert.equal(riskOf(one(dataset({ acts: [act({ ts: "2026-10-02", contactIds: [], companyIds: ["co1"] })] })), R)!.level, "neutral");
-    assert.equal(riskOf(one(dataset({ companies: [company({ temperatureRaw: "Cold" })] })), R), null);
+    assert.equal(riskOf(one(dataset({ companies: [company({ competitorFlag: "Direct competitor" })] })), R), null);
   });
   test("critical equals the existing 'attention' bucket", () => {
     const ds = dataset({

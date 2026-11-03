@@ -267,7 +267,7 @@ export function accountQueue(rows: LeadFact[], rules: Rules) {
       sdrOwnerId: top.sdrOwnerId,
       sdrName: top.sdrOwnerId ? rosterById.get(top.sdrOwnerId)?.name ?? null : null,
       icpTier: top.icpTier,
-      temperature: leads.some((l) => l.temperature === "Hot") ? "Hot" : "Warm",
+      temperature: leads.some((l) => l.temperature === "Hot") ? "Hot" : leads.some((l) => l.temperature === "Warm") ? "Warm" : (leads.find((l) => l.temperatureRaw)?.temperatureRaw ?? "Not set"),
       eligibleContacts: new Set(leads.map((l) => l.contactId)).size,
       contactsWorked: new Set(leads.filter((l) => l.touchesSinceEligibility > 0).map((l) => l.contactId)).size,
       touches: touchIds.size,

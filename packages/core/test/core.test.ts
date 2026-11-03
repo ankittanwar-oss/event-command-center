@@ -14,6 +14,24 @@ const one = (ds: ReturnType<typeof dataset>, today = "2026-10-30", r = R): LeadF
   return f[0]!;
 };
 
+describe("pod routing via the company's AE owner", () => {
+  test("SDR Owner is the outreach pseudo-SDR (Anna S) and the AE is Aditya Deepak -> Jonathan", () => {
+    const f = one(dataset({ companies: [company({ sdrOwnerId: "86492694", hubspotOwnerId: "95241225" })] }));
+    assert.equal(f.sdrOwnerId, "97411438");
+    assert.equal(f.sdrSource, "pod_ae");
+  });
+  test("empty SDR Owner with a pod AE -> pod SDR; a pod SDR already set is kept", () => {
+    assert.equal(one(dataset({ companies: [company({ sdrOwnerId: null, hubspotOwnerId: "79976078" })] })).sdrOwnerId, "87607260");
+    const kept = one(dataset({ companies: [company({ sdrOwnerId: "92977365", hubspotOwnerId: "79976078" })] }));
+    assert.equal(kept.sdrOwnerId, "92977365");
+    assert.equal(kept.sdrSource, "company");
+  });
+  test("non-pod AE and non-roster SDR stays unassigned", () => {
+    const f = one(dataset({ companies: [company({ sdrOwnerId: "86492694", hubspotOwnerId: "1" })] }));
+    assert.equal(f.sdrOwnerId, null);
+  });
+});
+
 describe("SDR mapping", () => {
   test("uses the company SDR Owner and only roster SDRs", () => {
     const f = one(dataset());
@@ -122,18 +140,26 @@ describe("attendance", () => {
 });
 
 describe("temperature and eligibility", () => {
-  test("Hot and Warm map; Surging is not mapped and is flagged", () => {
-    assert.equal(one(dataset({ companies: [company({ temperatureRaw: "Warm" })] })).temperature, "Warm");
-    const s = one(dataset({ companies: [company({ temperatureRaw: "Surging" })] }));
-    assert.equal(s.temperature, null);
-    assert.equal(s.eligible, false);
-    assert.ok(s.dataQuality.includes("temperature_unmapped_value"));
-  });
-  test("Cold is excluded but not a data issue; missing temperature is", () => {
+  const RH = rules({ requireHotWarm: true });
+  const oneR = (ds: ReturnType<typeof dataset>, r = RH) => computeLeadFacts(ds, r, "2026-10-30")[0]!;
+  test("default: every temperature is eligible; temperature is shown, not filtered", () => {
     const c = one(dataset({ companies: [company({ temperatureRaw: "Cold" })] }));
+    assert.equal(c.eligible, true);
+    assert.equal(c.temperature, null);
+    assert.equal(c.temperatureRaw, "Cold");
+  });
+  test("with requireHotWarm: Hot and Warm map; Surging is not mapped and is flagged", () => {
+    assert.equal(oneR(dataset({ companies: [company({ temperatureRaw: "Warm" })] })).temperature, "Warm");
+    const s2 = oneR(dataset({ companies: [company({ temperatureRaw: "Surging" })] }));
+    assert.equal(s2.temperature, null);
+    assert.equal(s2.eligible, false);
+    assert.ok(s2.dataQuality.includes("temperature_unmapped_value"));
+  });
+  test("with requireHotWarm: Cold is excluded but not a data issue; missing temperature is", () => {
+    const c = oneR(dataset({ companies: [company({ temperatureRaw: "Cold" })] }));
     assert.equal(c.ineligibleReason, "Lead temperature is Cold");
     assert.ok(!c.dataQuality.includes("temperature_unmapped_value"));
-    assert.ok(one(dataset({ companies: [company({ temperatureRaw: null })] })).dataQuality.includes("temperature_missing"));
+    assert.ok(oneR(dataset({ companies: [company({ temperatureRaw: null })] })).dataQuality.includes("temperature_missing"));
   });
   test("exclusions", () => {
     assert.equal(one(dataset({ companies: [company({ competitorFlag: "Direct competitor" })] })).ineligibleReason, "Competitor");
