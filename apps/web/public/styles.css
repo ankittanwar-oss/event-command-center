@@ -433,3 +433,9 @@ tr.row-crit td { background: color-mix(in srgb, var(--crit-soft) 40%, transparen
   .wct, .wsd { display: none; }
 }
 @media (prefers-color-scheme: dark) { .wtag.eng { background: #312e81; color: #c7d2fe; } .wact { color: #93c5fd; } }
+.dims { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+.dimline b { font-weight: 600; }
+.rdims { font-size: 12px; margin-top: 2px; }
+.sctable th.grp { text-align: center; font-size: 11px; text-transform: uppercase; letter-spacing: .03em; border-bottom: 1px solid var(--line, #e4e4e7); }
+.dbar { display: flex; height: 10px; border-radius: 5px; overflow: hidden; min-width: 120px; background: rgba(0,0,0,.05); }
+.dbar .db { cursor: pointer; } .db.b0 { background: #d4d4d8; } .db.b1 { background: #bfdbfe; } .db.b23 { background: #93c5fd; } .db.b45 { background: #60a5fa; } .db.b67 { background: #3b82f6; } .db.b8 { background: #1d4ed8; }

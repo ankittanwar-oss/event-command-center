@@ -1,6 +1,6 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { computeLeadFacts, leadWork, worklist } from "../src/index.js";
+import { computeLeadFacts, leadDimensions, leadWork, riskOf, worklist } from "../src/index.js";
 import { act, AE, BOBBI, company, contact, dataset, deal, DISHA, event, rules } from "./fixtures.js";
 
 const R = rules();
@@ -31,7 +31,27 @@ describe("daily worklist", () => {
   });
   test("fewer than 6-7 touches alone is not overdue: follow-up due from the cadence rule", () => {
     const w = one(dataset({ acts: [act({ ts: "2026-10-27" })] }));
-    assert.equal(w.action, "Follow up"); assert.equal(w.section, "upcoming");
+    assert.equal(w.action, "Follow up"); assert.notEqual(w.section, "overdue");
+    // below the expected-touch curve for its age -> due (amber), matching the existing insufficientFollowUp rule
+    const f = computeLeadFacts(dataset({ acts: [act({ ts: "2026-10-27" })] }), R, T)[0]!;
+    assert.equal(w.section === "today", f.insufficientFollowUp);
+    // a new lead with one touch and nothing due yet is "not yet due", never overdue
+    const n = one(dataset({ events: [event({ date: "2026-10-28" })], acts: [act({ ts: "2026-10-28" })] }));
+    assert.equal(n.section, "upcoming");
+  });
+  test("one touch + open opportunity only on the account is not 'healthy'; a deal on the contact is", () => {
+    const acctDeal = computeLeadFacts(dataset({ acts: [act({ ts: "2026-10-02" })], deals: [deal({ contactIds: [] })] }), R, T)[0]!;
+    assert.equal(acctDeal.status, "in_play");
+    assert.equal(riskOf(acctDeal, R)?.level, "neutral");
+    assert.equal(leadDimensions(acctDeal, T, R).health, "unverified");
+    const contactDeal = computeLeadFacts(dataset({ acts: [act({ ts: "2026-10-02" })], deals: [deal()] }), R, T)[0]!;
+    assert.equal(riskOf(contactDeal, R)?.level, "healthy");
+  });
+  test("SLA, depth and follow-up are independent: one on-time touch can still have follow-up due", () => {
+    const f = computeLeadFacts(dataset({ acts: [act({ ts: "2026-10-02" })] }), R, T)[0]!;
+    const d = leadDimensions(f, T, R);
+    assert.equal(d.sla, "First-touch SLA met"); assert.equal(d.depth, "1");
+    assert.match(d.followUp!, /Follow-up (due|overdue)/); assert.match(d.cadence!, /incomplete/);
   });
   test("reassigned account: previous SDR touches kept as context, not credited; SLA runs from allocation", () => {
     const ds = dataset({ companies: [company({ allocationDate: "2026-10-26" })], acts: [act({ ts: "2026-10-05", ownerId: DISHA })] });
@@ -56,4 +76,12 @@ describe("daily worklist", () => {
     assert.equal(wl.items.length, 2);
     assert.equal(Object.values(wl.counts).reduce((a, b) => a + b, 0), wl.items.length);
   });
+});
+
+test("SLA start date affects only the first-touch SLA, not follow-up cadence", () => {
+  const r = rules({ slaStartDate: "2026-10-30" });
+  const f = computeLeadFacts(dataset({ acts: [act({ ts: "2026-10-26" })] }), r, T)[0]!;
+  assert.equal(f.firstTouchSlaMet, null);
+  assert.equal(f.insufficientFollowUp, true);
+  assert.equal(riskOf(f, r)?.level, "at_risk");
 });

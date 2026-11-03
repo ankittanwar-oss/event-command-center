@@ -178,42 +178,60 @@ export async function overviewView(route: Route): Promise<HTMLElement> {
     return v <= t.green ? "sc-g" : v <= t.amber ? "sc-a" : "sc-r";
   };
   const pc = (n: number, of: number) => (of ? Math.round((n / of) * 100) : null);
-  const scRows = d.sdrs.map((r: any) => {
-    const dp = d.depth?.[r.ownerId];
-    const leads = dp?.measuredLeads ?? 0;
-    const reached = leads - (dp?.bands?.b0 ?? 0);
-    const followed = reached - (dp?.bands?.b1 ?? 0);
-    // All temperatures (Hot, Warm, Cold, not set), so each cell matches the list it opens.
-    const met = r.allSla?.met ?? 0, dec = r.allSla?.decided ?? 0;
-    return { r, leads, reached, followed, met, dec, overdue: r.allOverdue ?? 0 };
-  }).filter((x: any) => x.leads > 0).sort((a: any, b: any) => b.overdue - a.overdue || (pc(a.reached, a.leads) ?? 0) - (pc(b.reached, b.leads) ?? 0));
-  // Each cell: big count, small "of N" underneath. Colour = how that count compares with target.
-  const cell = (key: string, v: number | null, big: string, small: string, tip: string, bucket: string, ownerId: string) =>
-    h("td", { class: `sc ${grade(key, v)}`, title: tip, onclick: () => open(bucket, { sdr: ownerId, region: "" }) },
-      h("div", { class: "scb" }, big), small ? h("div", { class: "scs" }, small) : null);
+  // Same population as every drill-down: eligible leads for the SDR under the current filters (event-lead records).
+  const scRows = d.sdrs.map((r: any) => ({ r, c: d.dims?.[r.ownerId] })).filter((x: any) => x.c && x.c.leads > 0)
+    .sort((a: any, b: any) => (b.c.firstOverdue + b.c.followOverdue) - (a.c.firstOverdue + a.c.followOverdue) || b.c.leads - a.c.leads);
+  const num = (big: string, small: string, bucket: string, ownerId: string, cls = "sc-n", tip = "") =>
+    h("td", { class: `sc ${cls}`, title: tip, onclick: () => open(bucket, { sdr: ownerId, region: "" }) }, h("div", { class: "scb" }, big), small ? h("div", { class: "scs" }, small) : null);
+  const BANDS = [["0", "0"], ["1", "1"], ["2–3", "23"], ["4–5", "45"], ["6–7", "67"], ["8+", "8"]] as const;
+  const depthBar = (c: any, ownerId: string) => h("td", { class: "sc sc-n" }, h("div", { class: "dbar" },
+    BANDS.map(([k, key]) => c.depth[k] ? h("span", { class: `db b${key}`, style: `flex:${c.depth[k]}`, title: `${k} touches: ${c.depth[k]} leads`, onclick: () => open(`depth_${key}`, { sdr: ownerId, region: "" }) }) : null)),
+    h("div", { class: "scs" }, BANDS.filter(([k]) => c.depth[k]).map(([k]) => `${k}:${c.depth[k]}`).join(" ")));
+  const slaCls = (met: number, dec: number) => dec ? grade("sla", pc(met, dec)) : "sc-n";
+  const odCls = (n: number) => grade("overdue", n);
   const scorecard = h("div", { class: "card scard" },
     h("div", { class: "hd" }, h("span", { class: "t" }, "SDR scorecard"),
-      h("span", { class: "muted", style: "margin-left:auto" }, h("b", { class: "g-t" }, "● on track  "), h("b", { class: "a-t" }, "● slipping  "), h("b", { class: "r-t" }, "● behind"), " · click any cell for the leads")),
+      h("span", { class: "muted", style: "margin-left:auto" }, "Colour only on deadlines (SLA, overdue) · coverage and depth are shown, not graded · click any cell")),
     scRows.length ? h("div", { class: "tbl-wrap" }, h("table", { class: "sctable" },
-      h("thead", null, h("tr", null,
-        h("th", null, "SDR"), h("th", { class: "n" }, "Leads"),
-        h("th", { class: "n", title: "Leads with at least one SDR touch" }, "Reached"),
-        h("th", { class: "n", title: "Reached leads touched 2+ times" }, "Followed up"),
-        h("th", { class: "n", title: `First touch on time – only leads eligible since ${fmt.day(d.slaStartDate ?? "2026-10-30")}` }, `On time (since ${fmt.day(d.slaStartDate ?? "2026-10-30")})`),
-        h("th", { class: "n", title: "Past the first-touch deadline with no outreach" }, "Overdue now"))),
-      h("tbody", null, scRows.map((x: any) => h("tr", null,
-        h("td", null, h("span", { class: "link", onclick: () => open("eligible", { sdr: x.r.ownerId, region: "" }, x.r.name) }, x.r.name)),
-        h("td", { class: "n sc-n" }, h("div", { class: "scb" }, `${x.leads}`)),
-        cell("coverage", pc(x.reached, x.leads), `${x.reached}`, `of ${x.leads}`, `${x.leads - x.reached} not reached yet`, "untouched", x.r.ownerId),
-        cell("followUp", pc(x.followed, x.reached), `${x.followed}`, `of ${x.reached}`, `${x.reached - x.followed} touched only once`, "one_touch", x.r.ownerId),
-        x.dec ? cell("sla", pc(x.met, x.dec), `${x.met}`, `of ${x.dec}`, `${x.dec - x.met} first touched late or not at all`, "sla_missed", x.r.ownerId)
-          : h("td", { class: "sc sc-n", title: "No leads due under the SLA yet" }, h("div", { class: "scb faint" }, "–"), h("div", { class: "scs" }, "none due")),
-        cell("overdue", x.overdue, `${x.overdue}`, "", "Leads past the first-touch deadline with no outreach", "overdue", x.r.ownerId)))))) : h("div", { class: "empty" }, "No SDR has eligible leads in this view."),
-    h("div", { class: "legend", style: "padding: 8px 14px" }, "Targets: reached 80% · followed up 50% · on time 80% · overdue 0. Editable in Admin → Business rules."));
+      h("thead", null,
+        h("tr", null, h("th", { rowspan: 2 }, "SDR"), h("th", { class: "n", rowspan: 2 }, "Eligible leads"),
+          h("th", { class: "grp", colspan: 3 }, "A · First touch"), h("th", { class: "grp", colspan: 2 }, "B · Follow-up depth"), h("th", { class: "grp", colspan: 2 }, "C · Follow-up timing")),
+        h("tr", null,
+          h("th", { class: "n", title: "Leads with ≥1 qualifying SDR touch since eligibility" }, "Touched"),
+          h("th", { class: "n", title: `First touch within the SLA; only leads eligible since ${fmt.day(d.slaStartDate ?? "2026-10-30")} are judged` }, "On time"),
+          h("th", { class: "n", title: "No touch and past the first-touch SLA" }, "Overdue"),
+          h("th", { class: "n", title: "Leads with 2 or more qualifying SDR touches since eligibility" }, "2+ touches"),
+          h("th", { title: "Leads by qualifying touches: 0 · 1 · 2–3 · 4–5 · 6–7 · 8+" }, "Touch bands"),
+          h("th", { class: "n", title: "Below the expected-touch curve for the lead's age, not yet stalled" }, "Due"),
+          h("th", { class: "n", title: "No touch for longer than the stall threshold" }, "Overdue"))),
+      h("tbody", null, scRows.map(({ r, c }: any) => h("tr", null,
+        h("td", null, h("span", { class: "link", onclick: () => open("eligible", { sdr: r.ownerId, region: "" }, r.name) }, r.name)),
+        num(`${c.leads}`, "", "eligible", r.ownerId),
+        num(`${c.touched}`, `of ${c.leads}`, "worked", r.ownerId),
+        c.slaMet + c.slaMissed ? num(`${c.slaMet}`, `of ${c.slaMet + c.slaMissed}`, "sla_missed", r.ownerId, slaCls(c.slaMet, c.slaMet + c.slaMissed), `${c.slaMissed} first touched late or not at all`)
+          : h("td", { class: "sc sc-n", title: "No lead has reached its first-touch deadline under the SLA yet" }, h("div", { class: "scb faint" }, "–"), h("div", { class: "scs" }, "none due")),
+        num(`${c.firstOverdue}`, "", "overdue", r.ownerId, odCls(c.firstOverdue)),
+        num(`${c.multi}`, `of ${c.touched} touched`, "multi_touch", r.ownerId),
+        depthBar(c, r.ownerId),
+        num(`${c.followDue}`, "", "follow_due", r.ownerId, c.followDue ? "sc-a" : "sc-n"),
+        num(`${c.followOverdue}`, "", "follow_overdue", r.ownerId, odCls(c.followOverdue))))))) : h("div", { class: "empty" }, "No SDR has eligible leads in this view."),
+    h("div", { class: "legend", style: "padding: 8px 14px" },
+      "Counts are event-lead records (a contact registered for two events counts twice), the same population as every drill-down. ",
+      "Touches = qualifying outbound SDR touches since eligibility (later of event date and SDR allocation). ",
+      "A lead with one touch can be on time and still need follow-up: depth is never coloured."));
+  const HL: Array<[string, string]> = [["overdue", "Overdue"], ["due_today", "Due today"], ["upcoming", "Upcoming ≤5 bd"], ["not_yet_due", "Not yet due"], ["on_track", "On track"], ["unverified", "Unable to verify / paused"]];
+  const healthCard = scRows.length ? h("div", { class: "card scard" },
+    h("div", { class: "hd" }, h("span", { class: "t" }, "Action health"), h("span", { class: "muted", style: "margin-left:auto" }, "Each eligible lead in exactly one column · from SLA, cadence and verified task/reply dates")),
+    h("div", { class: "tbl-wrap" }, h("table", { class: "sctable" },
+      h("thead", null, h("tr", null, h("th", null, "SDR"), HL.map(([, l]) => h("th", { class: "n" }, l)))),
+      h("tbody", null, scRows.map(({ r, c }: any) => h("tr", null, h("td", null, r.name),
+        HL.map(([k]) => num(`${c.health[k]}`, "", `health_${k}`, r.ownerId, k === "overdue" && c.health[k] ? "sc-r" : "sc-n"))))))),
+    h("div", { class: "legend", style: "padding: 8px 14px" }, "On track = cadence complete, or in play with a meeting, reply or deal on this contact. Open opportunities that sit only on the account are \"Unable to verify\", not on track.")) : null;
 
   return h("div", null,
     narrative,
     scorecard,
+    healthCard,
     depthHead,
     summary,
     h("h2", null, "Where leadership should focus", h("span", { class: "sub" }, "Verified gaps, ordered by severity, temperature and volume · click to see the records")),

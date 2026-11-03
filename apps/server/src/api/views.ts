@@ -1,6 +1,6 @@
 import {
   accountQueue, applyFilters, BUCKETS, categoryBreakdown, CATEGORY_LABEL, dataQuality, eventSummaries, fiscalQuarterOf, inBucket, nextAction,
-  normalizeFilters, parseQuarterKey, worklist, DEFAULT_RULES, dealOrder, type DealRef, depthStats, sdrDepth, accountDepth, WINDOW_LABEL, BANDS, type TouchWindow, findings, narrative, RISK_LABEL, riskCounts, riskOf, sdrRisk, previousQuarter, qoq, quarterMetrics, regionBreakdown, rosterById, SDR_ROSTER, sdrTable, STATUS_LABEL, temperatureSummary,
+  normalizeFilters, parseQuarterKey, worklist, leadDimensions, ACTION_HEALTH_LABEL, DEFAULT_RULES, dealOrder, type DealRef, depthStats, sdrDepth, accountDepth, WINDOW_LABEL, BANDS, type TouchWindow, findings, narrative, RISK_LABEL, riskCounts, riskOf, sdrRisk, previousQuarter, qoq, quarterMetrics, regionBreakdown, rosterById, SDR_ROSTER, sdrTable, STATUS_LABEL, temperatureSummary,
   type EventCategory, type Filters, type LeadFact, type NormalizedFilters, type Region, type Rules,
 } from "@ecc/core";
 
@@ -37,15 +37,26 @@ export function filtered(facts: LeadFact[], q: URLSearchParams, today: string, o
 }
 
 /** Adds the presentation-only risk level to a lead record. */
-function withRisk(f: LeadFact, rules: Rules) {
+function withRisk(f: LeadFact, rules: Rules, today?: string) {
   const r = riskOf(f, rules);
+  const dm = today && f.eligible ? leadDimensions(f, today, rules) : null;
+  const dims = dm ? { sla: dm.sla, depth: dm.depth, followUp: dm.followUp, cadence: dm.cadence, health: dm.health, healthLabel: ACTION_HEALTH_LABEL[dm.health] } : null;
   const label = f.status === "in_play" && f.touchesSinceEligibility === 0 ? "In play – no SDR touch" : STATUS_LABEL[f.status];
-  return { ...f, nextAction: nextAction(f, rules), statusLabel: label, risk: r?.level ?? null, riskLabel: r ? RISK_LABEL[r.level] : null, riskReason: r?.reason ?? null };
+  return { ...f, dims, nextAction: nextAction(f, rules), statusLabel: label, risk: r?.level ?? null, riskLabel: r ? RISK_LABEL[r.level] : null, riskReason: r?.reason ?? null };
 }
 
 /** Bucket predicate including the risk buckets (risk_critical, risk_at_risk, risk_healthy, risk_neutral). */
-function matches(f: LeadFact, bucket: string, rules: Rules): boolean {
+function matches(f: LeadFact, bucket: string, rules: Rules, today = ""): boolean {
   if (bucket.startsWith("risk_")) return riskOf(f, rules)?.level === bucket.slice(5);
+  // Dimension buckets: health_<key>, depth_<band>, follow_overdue, follow_due (eligible leads only)
+  if (bucket.startsWith("health_") || bucket.startsWith("depth_") || bucket.startsWith("follow_")) {
+    if (!f.eligible) return false;
+    const d = leadDimensions(f, today, rules);
+    if (bucket.startsWith("health_")) return d.health === bucket.slice(7);
+    if (bucket.startsWith("depth_")) return d.depth === ({ "0": "0", "1": "1", "23": "2–3", "45": "4–5", "67": "6–7", "8": "8+" } as Record<string, string>)[bucket.slice(6)];
+    if (bucket === "follow_overdue") return f.touchesSinceEligibility > 0 && d.health === "overdue";
+    if (bucket === "follow_due") return f.touchesSinceEligibility > 0 && d.health === "due_today";
+  }
   return inBucket(f, bucket);
 }
 
@@ -94,6 +105,24 @@ export function depth(facts: LeadFact[], q: URLSearchParams, today: string, rule
   };
 }
 
+export function dimCounts(list: LeadFact[], today: string, rules: Rules) {
+  const c = { leads: list.length, touched: 0, multi: 0, slaMet: 0, slaMissed: 0, firstOverdue: 0, followOverdue: 0, followDue: 0,
+    health: { overdue: 0, due_today: 0, upcoming: 0, not_yet_due: 0, on_track: 0, unverified: 0 } as Record<string, number>,
+    depth: { "0": 0, "1": 0, "2–3": 0, "4–5": 0, "6–7": 0, "8+": 0 } as Record<string, number> };
+  for (const f of list) {
+    const d = leadDimensions(f, today, rules);
+    if (f.touchesSinceEligibility > 0) c.touched++;
+    if (f.touchesSinceEligibility >= 2) c.multi++;
+    if (f.firstTouchSlaMet === true) c.slaMet++;
+    if (f.firstTouchSlaMet === false) c.slaMissed++;
+    if (f.status === "never_worked" && f.firstTouchOverdue) c.firstOverdue++;
+    if (f.touchesSinceEligibility > 0 && d.health === "overdue") c.followOverdue++;
+    if (f.touchesSinceEligibility > 0 && d.health === "due_today") c.followDue++;
+    c.health[d.health]!++; c.depth[d.depth]!++;
+  }
+  return c;
+}
+
 export function overview(facts: LeadFact[], q: URLSearchParams, today: string, rules: Rules = DEFAULT_RULES) {
   const { nf, rows } = filtered(facts, q, today);
   const cur = nf.quarter ? parseQuarterKey(nf.quarter) : null;
@@ -136,6 +165,8 @@ export function overview(facts: LeadFact[], q: URLSearchParams, today: string, r
     focus: top,
     depth: Object.fromEntries(sdrTable(rows, nf).map((s) => [s.ownerId, sdrDepth(rows, s.ownerId, rules, "eligibility", nf.quarterRange).all])),
     touchTarget: rules.touchTarget,
+    // Three independent dimensions per SDR, all on the same population as the drill-downs (eligible leads, filtered).
+    dims: Object.fromEntries(sdrTable(rows, nf).map((sd) => [sd.ownerId, dimCounts(rows.filter((f) => f.eligible && f.sdrOwnerId === sd.ownerId), today, rules)])),
     scorecardTargets: rules.scorecardTargets, slaStartDate: rules.slaStartDate ?? null,
     dealContext: dealContext(rows, today),
     narrative: narrative(rows, rules, top),
@@ -146,12 +177,12 @@ export function overview(facts: LeadFact[], q: URLSearchParams, today: string, r
 export function leads(facts: LeadFact[], q: URLSearchParams, today: string, rules: Rules) {
   const { nf, rows } = filtered(facts, q, today);
   const bucket = (q.get("bucket") || "").trim();
-  const list = bucket ? rows.filter((f) => matches(f, bucket, rules)) : rows;
+  const list = bucket ? rows.filter((f) => matches(f, bucket, rules, today)) : rows;
   list.sort((a, b) => b.priority - a.priority || (a.eventDate ?? "").localeCompare(b.eventDate ?? ""));
   const limit = Math.min(5000, Number(q.get("limit") || 1000));
   return {
     filters: nf, bucket: bucket || null, total: list.length,
-    rows: list.slice(0, limit).map((f) => withRisk(f, rules)),
+    rows: list.slice(0, limit).map((f) => withRisk(f, rules, today)),
   };
 }
 

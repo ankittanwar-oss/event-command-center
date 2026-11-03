@@ -28,7 +28,10 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawe
 export const BUCKET_LABEL: Record<string, string> = {
   eligible: "Eligible leads", worked: "Worked (≥1 touch)", never_worked: "Never worked", overdue: "First touch overdue",
   insufficient: "Insufficient follow-up", active: "Actively worked", first_touch: "First touch completed", stalled: "Follow-up stalled",
-  in_play: "Completed / in play", unverifiable: "Unable to verify", recently_lost: "Recently closed lost", one_touch: "One touch only", multi_week: "Multi-week follow-up",
+  in_play: "In play (opportunity, meeting, reply, DQ)",
+  health_overdue: "Overdue actions", health_due_today: "Due today", health_upcoming: "Upcoming (next 5 business days)", health_not_yet_due: "Not yet due",
+  health_on_track: "On track", health_unverified: "Unable to verify / paused", follow_overdue: "Follow-up overdue", follow_due: "Follow-up due",
+  depth_0: "0 touches", depth_1: "1 touch", depth_23: "2–3 touches", depth_45: "4–5 touches", depth_67: "6–7 touches", depth_8: "8+ touches", unverifiable: "Unable to verify", recently_lost: "Recently closed lost", one_touch: "One touch only", multi_week: "Multi-week follow-up",
   sla_met: "First-touch SLA met", sla_missed: "First-touch SLA missed", attention: "Needs attention", no_next_step: "No next step scheduled",
   one_touch_due: "One touch only, more outreach due",
   multi_touch: "Multi-touch (2+ touches)", untouched: "No touch yet", in_play_touched: "In play, worked by SDR", in_play_untouched: "In play, no SDR touch",
@@ -56,7 +59,7 @@ export async function openLeads(filters: FilterState, bucket: string, extra: Rec
         h("span", { class: "chipx" }, r.filters.quarterLabel),
         active.map((a) => h("span", { class: "chipx" }, a)),
         r.filters.sdrCleared ? h("span", { class: "chipx warnr-t" }, "SDR filter cleared: not in this region") : null,
-        h("span", { class: "dmix" }, riskSummary(r.rows))),
+        h("span", { class: "dmix" }, dimSummary(r.rows))),
       note ?? "",
       leadTable(r.rows));
   } catch (e) { body.replaceChildren(h("div", { class: "banner warn" }, String((e as Error).message))); }
@@ -73,9 +76,32 @@ function riskSummary(rows: any[]) {
   return h("div", { class: "kvbar" }, riskBar(c as any), levels.map((l) => h("span", { class: `li ${RISK[l].cls}` }, h("i", null, RISK[l].icon), `${RISK[l].label} ${c[l]}`)));
 }
 
+/** Header mix for a drill-down: three separate dimensions, never one blended "healthy". */
+function dimSummary(rows: any[]) {
+  const el = rows.filter((r) => r.dims);
+  if (!el.length) return riskSummary(rows);
+  const tally = (key: string, norm: (v: string) => string = (v) => v) => {
+    const m = new Map<string, number>();
+    for (const r of el) { const v = r.dims[key]; if (v) m.set(norm(v), (m.get(norm(v)) ?? 0) + 1); }
+    return [...m.entries()].sort((a, b) => b[1] - a[1]);
+  };
+  const line = (title: string, entries: Array<[string, number]>) => entries.length
+    ? h("div", { class: "dimline" }, h("b", null, `${title}: `), entries.map(([k, n], i) => [i ? " · " : "", `${k} ${n}`])) : null;
+  return h("div", { class: "dims" },
+    line("First touch", tally("sla")),
+    line("Follow-up", tally("followUp", (v) => v.replace(/ \(.*$/, ""))),
+    line("Cadence", tally("cadence", (v) => v.startsWith("Cadence incomplete") ? "Incomplete" : "Complete")),
+    line("Action health", tally("healthLabel")));
+}
+
 /** Short, scannable follow-up state for a record. Colour: red overdue/stalled, amber action due, green on track, grey informational. */
 export function shortStatus(r: any): { label: string; cls: "crit" | "warnr" | "ok" | "neu" } {
   if (!r.eligible) return { label: "Not eligible", cls: "neu" };
+  if (r.dims?.followUp && r.status !== "in_play") {
+    const fu: string = r.dims.followUp.replace(/ \(by .*\)$/, "");
+    const cls = /overdue/i.test(fu) ? "crit" : /due|awaiting/i.test(fu) ? "warnr" : "neu";
+    return { label: fu, cls };
+  }
   switch (r.status) {
     case "never_worked":
       if (r.firstTouchOverdue) return { label: "Overdue · never worked", cls: "crit" };
@@ -86,7 +112,8 @@ export function shortStatus(r: any): { label: string; cls: "crit" | "warnr" | "o
     case "active": return { label: "On track", cls: "ok" };
     case "in_play": {
       const kind = /^Open opportunity/.test(r.inPlayReason ?? "") ? "Open opportunity" : /^Meeting/.test(r.inPlayReason ?? "") ? "Meeting" : /^Prospect replied/.test(r.inPlayReason ?? "") ? "Replied" : /Disqualified/.test(r.inPlayReason ?? "") ? "Disqualified" : "In play";
-      return r.touchesSinceEligibility > 0 ? { label: `In play · ${kind}`, cls: "ok" } : { label: `${kind} · no SDR touch`, cls: "neu" };
+      if (r.touchesSinceEligibility === 0) return { label: `${kind} · no SDR touch`, cls: "neu" };
+      return r.risk === "healthy" ? { label: `In play · ${kind}`, cls: "ok" } : { label: `${kind} on account · follow-up unverified`, cls: "neu" };
     }
     case "unverifiable": return { label: "Unverified · company-level activity", cls: "neu" };
     case "recently_lost": return { label: "Recently closed lost", cls: "neu" };
@@ -155,6 +182,7 @@ export function leadTable(rows: any[]) {
         h("span", null, r.attendance === "attended" ? "Attended" : r.attendance === "no_show" ? "Did not attend" : "Attendance unknown"),
         h("span", { class: `rtouch ${r.touchesSinceEligibility ? "" : "zero"}` }, `${r.touchesSinceEligibility} SDR touch${r.touchesSinceEligibility === 1 ? "" : "es"}`),
         r.lastTouchAt ? h("span", null, `last ${fmt.day(r.lastTouchAt)}`) : null),
+      r.dims ? h("div", { class: "rdims muted" }, [r.dims.sla, r.dims.cadence, r.dims.followUp && r.status === "in_play" ? r.dims.followUp : null].filter(Boolean).join(" · ")) : null,
       h("div", { class: "rl3" }, h("span", { class: "ract", title: r.nextAction ?? "" }, r.eligible ? shortAction(r.nextAction) : `Excluded: ${r.ineligibleReason ?? ""}`), toggle),
       details);
     return el;

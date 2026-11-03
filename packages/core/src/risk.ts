@@ -1,6 +1,7 @@
 import { rosterById, type Rules } from "./config.js";
 import { CATEGORY_LABEL } from "./events.js";
 import type { LeadFact, Temperature } from "./types.js";
+import { contactLevelInPlay } from "./worklist.js";
 
 // ---------------------------------------------------------------------------------------------------------------
 // Risk levels for presentation. Derived ONLY from the existing follow-up statuses and the existing configured
@@ -11,7 +12,8 @@ import type { LeadFact, Temperature } from "./types.js";
 //               beyond the configured stall threshold (status stalled).  [= the existing "attention" bucket]
 //   at_risk   – first touch is due today (business days since eligibility = SLA, still no outreach), or touched but
 //               below the expected cadence for the lead's age (existing insufficientFollowUp flag).
-//   healthy   – actively worked (status active) or completed / in play (meeting, reply, open opportunity, DQ).
+//   healthy   – actively worked (status active), or in play with evidence on this contact (meeting, reply, or a
+//               deal associated with the contact) after at least one SDR touch. Account-only deals are neutral.
 //   neutral   – not enough to judge: outreach not yet due (inside the SLA window), one touch with the next touch
 //               not yet due, or activity that cannot be verified on the contact (status unverifiable).
 //
@@ -48,9 +50,11 @@ export function riskOf(f: LeadFact, rules: Rules): { level: RiskLevel; reason: s
     case "in_play":
       // In play only counts as healthy when the SDR has actually worked the lead. An open deal, meeting or reply
       // with no qualifying SDR touch is shown grey, so "healthy" always means real follow-up happened.
-      return f.touchesSinceEligibility > 0
-        ? { level: "healthy", reason: f.inPlayReason ?? "In play" }
-        : { level: "neutral", reason: `${f.inPlayReason ?? "In play"}, but no SDR touch logged` };
+      // An open opportunity that sits only on the account (not on this contact) says nothing about this lead's
+      // follow-up, so it is shown grey rather than green.
+      if (f.touchesSinceEligibility === 0) return { level: "neutral", reason: `${f.inPlayReason ?? "In play"}, but no SDR touch logged` };
+      if (!contactLevelInPlay(f)) return { level: "neutral", reason: `${f.inPlayReason ?? "In play"} on the account (not this contact); follow-up not assessed` };
+      return { level: "healthy", reason: f.inPlayReason ?? "In play" };
     case "unverifiable":
       return { level: "neutral", reason: "Activity cannot be verified on the contact" };
     case "recently_lost":

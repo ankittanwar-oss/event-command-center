@@ -257,7 +257,9 @@ export function computeLeadFact(
 
   // No SLA for recently-lost accounts, or for leads that became eligible before the SLA started (rules.slaStartDate).
   const noSla = status === "recently_lost" || (!!rules.slaStartDate && !!eligibilityDate && eligibilityDate < rules.slaStartDate);
-  const insufficient = eligible && sinceElig.length > 0 && !inPlayReason && !noSla && (sinceElig.length < expected || status === "stalled");
+  // The SLA start date only governs the FIRST-touch SLA. Follow-up cadence is judged for every worked lead
+  // (except recently-lost accounts), otherwise a one-touch lead would read "not yet due" while below cadence.
+  const insufficient = eligible && sinceElig.length > 0 && !inPlayReason && status !== "recently_lost" && (sinceElig.length < expected || status === "stalled");
 
   const icpPriority = !!tier && PRIORITY_TIERS.has(tier);
   let priority = 0;

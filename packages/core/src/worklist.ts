@@ -1,6 +1,7 @@
 // SDR daily worklist: turns lead facts into ONE next action per account, placed in exactly one section.
 // Presentation logic only: it reads existing facts and rules and never changes status, SLA or any reported metric.
-import { rosterById, type Rules } from "./config.js";
+import { rosterById, type CadenceRule, type Rules } from "./config.js";
+import { expectedTouches } from "./leads.js";
 import { addDays, businessDaysBetween, toDate } from "./dates.js";
 import type { LeadFact } from "./types.js";
 
@@ -97,13 +98,74 @@ export function leadWork(f: LeadFact, today: string, rules: Rules): WorkItem {
     return item(p.section, "Send first outreach", `${f.temperature ?? "Temp not set"} lead, no SDR touch since ${f.eligibilityDate}`, due, "sla", p.overdue);
   }
 
-  // 5. Worked: next follow-up from the existing staleness rule. Fewer than 6–7 touches alone never makes it overdue.
+  // 5. Worked: two existing rules, kept consistent with the rest of the app:
+  //    - follow-up DUE once the lead falls below the configured expected-touches curve for its age (existing
+  //      insufficientFollowUp / "at risk" rule);
+  //    - follow-up OVERDUE once the gap since the last touch exceeds the stall threshold (existing "stalled" rule).
+  //    Fewer than 6–7 touches alone never makes a lead overdue.
   const target = rules.touchTarget?.bandMax ?? 7;
   if (f.touchesSinceEligibility >= target) return item("monitor", "Review next step", `Cadence complete (${f.touchesSinceEligibility} touches, no reply)`);
-  const last = toDate(f.lastTouchAt)!;
-  const due = addBusinessDays(last, rule.stallBusinessDays, rules);
-  const p = placeByDate(due, today, rules);
-  return item(p.section, "Follow up", `Next is touch ${f.touchesSinceEligibility + 1} (target ${rules.touchTarget?.minimum ?? 6}–${target}); last touch ${last}`, due, "cadence", p.overdue);
+  const last = toDate(f.lastTouchAt);
+  if (!last) return item("monitor", "Needs review", "Follow-up timing unverified (last touch date unknown)");
+  const stallDue = addBusinessDays(last, rule.stallBusinessDays + 1, rules);
+  const cadDue = cadenceDue(f, rule);
+  const why = `Next is touch ${f.touchesSinceEligibility + 1} (target ${rules.touchTarget?.minimum ?? 6}–${target}); last touch ${last}`;
+  if (stallDue <= today) return item("overdue", "Follow up", why, stallDue, "cadence", Math.max(1, businessDaysBetween(stallDue, today, rules.businessCalendar)));
+  if (cadDue && cadDue <= today) return item("today", "Follow up", `${why}; below expected cadence since ${cadDue}`, cadDue, "cadence");
+  const due = cadDue && cadDue < stallDue ? cadDue : stallDue;
+  return item("upcoming", "Follow up", why, due, "cadence");
+}
+
+/** First day the lead falls below the configured expected-touches curve, given its current touch count. */
+export function cadenceDue(f: LeadFact, rule: CadenceRule): string | null {
+  if (!f.eligibilityDate) return null;
+  for (let a = 0; a <= 400; a++) if (expectedTouches(a, rule) > f.touchesSinceEligibility) return addDays(f.eligibilityDate, a);
+  return null;
+}
+
+export type ActionHealth = "overdue" | "due_today" | "upcoming" | "not_yet_due" | "on_track" | "unverified";
+export const ACTION_HEALTH_LABEL: Record<ActionHealth, string> = {
+  overdue: "Overdue", due_today: "Due today", upcoming: "Upcoming (≤5 bd)", not_yet_due: "Not yet due", on_track: "On track", unverified: "Unable to verify / paused",
+};
+
+/** Three independent views of one lead: first-touch SLA, follow-up timing, cadence progress; plus action health. */
+export function leadDimensions(f: LeadFact, today: string, rules: Rules) {
+  const w = leadWork(f, today, rules);
+  const t = f.touchesSinceEligibility;
+  const min = rules.touchTarget?.minimum ?? 6, max = rules.touchTarget?.bandMax ?? 7;
+  // A. first-touch
+  const sla = !f.eligible ? null
+    : t > 0 ? (f.firstTouchSlaMet === true ? "First-touch SLA met" : f.firstTouchSlaMet === false ? "First-touch SLA missed" : "First touch done (no SLA applied)")
+    : f.firstTouchOverdue ? "First touch overdue" : !slaApplies(f, rules) ? "No first-touch deadline (pre-SLA)" : "First touch not yet due";
+  // B. depth band
+  const depth = t === 0 ? "0" : t === 1 ? "1" : t <= 3 ? "2–3" : t <= 5 ? "4–5" : t <= 7 ? "6–7" : "8+";
+  // C. follow-up timing (only meaningful once touched)
+  let followUp: string | null = null;
+  if (f.eligible && t > 0) {
+    if (w.section === "respond") followUp = "Reply awaiting response";
+    else if (w.action === "Complete HubSpot task") followUp = w.section === "overdue" ? `HubSpot task overdue (${w.overdueBusinessDays} bd)` : w.section === "today" ? "HubSpot task due today" : `HubSpot task due ${w.due}`;
+    else if (w.action === "Follow up") followUp = w.section === "overdue" ? `Follow-up overdue (${w.overdueBusinessDays} bd)` : w.section === "today" ? "Follow-up due" : `Follow-up not yet due (by ${w.due})`;
+    else if (w.action === "Review next step") followUp = "Cadence complete – review";
+    else followUp = `Follow-up timing unverified (${w.why})`;
+  }
+  const cadence = !f.eligible ? null : t >= min ? `Cadence ${t}/${min}–${max} complete` : `Cadence incomplete (${t}/${min}–${max})`;
+  // action health (mutually exclusive)
+  let health: ActionHealth;
+  const fiveBd = addBusinessDays(today, 5, rules);
+  if (w.section === "overdue" || (w.section === "respond" && w.due! < today)) health = "overdue";
+  else if (w.section === "today" || w.section === "respond") health = "due_today";
+  else if (w.section === "upcoming") health = w.due && w.due <= fiveBd ? "upcoming" : "not_yet_due";
+  else if (w.action === "Review next step" || (w.action === "Monitor" && contactLevelInPlay(f))) health = "on_track";
+  else health = "unverified";
+  return { sla, depth, followUp, cadence, health, work: w };
+}
+
+/** In play with evidence on THIS contact (meeting, reply, or a deal associated with the contact), not only the account. */
+export function contactLevelInPlay(f: LeadFact): boolean {
+  const r = f.inPlayReason ?? "";
+  if (/^Meeting on|^Prospect replied/.test(r)) return true;
+  if (r.startsWith("Open opportunity")) return (f.deals ?? []).some((d) => d.status === "open" && d.via === "contact");
+  return false;
 }
 
 function rank(w: WorkItem): number[] {
