@@ -32,7 +32,8 @@ export function windowTouches(f: LeadFact, w: TouchWindow, period: { start: stri
   const all = (f.allTouchIds ?? f.touchIds).map((id, i) => ({ id, ts: (f.allTouchDates ?? f.touchDates)[i]! }));
   const day = (t: { ts: string }) => toDate(t.ts)!;
   switch (w) {
-    case "eligibility": return f.eligibilityDate ? all.filter((t) => day(t) >= f.eligibilityDate!) : null;
+    // Same set as touchesSinceEligibility (includes the current SDR's own touches made before a later allocation date).
+    case "eligibility": return f.eligibilityDate ? f.touchIds.map((id, i) => ({ id, ts: f.touchDates[i]! })) : null;
     case "allocation": return f.allocationDate ? all.filter((t) => day(t) >= f.allocationDate!) : null;
     case "event": return f.eventDate ? all.filter((t) => day(t) >= f.eventDate!) : null;
     case "period": return period ? all.filter((t) => day(t) >= period.start && day(t) <= period.end) : all;

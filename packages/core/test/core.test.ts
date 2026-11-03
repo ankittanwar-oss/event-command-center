@@ -229,11 +229,11 @@ describe("allocation and touch windows", () => {
   test("eligibility starts at the later of event date and allocation date", () => {
     const ds = dataset({
       companies: [company({ allocationDate: "2026-10-10" })],
-      acts: [act({ ts: "2026-10-05" }), act({ ts: "2026-10-12" })],
+      acts: [act({ ts: "2026-10-05", ownerId: DISHA }), act({ ts: "2026-10-12" })],
     });
     const f = one(ds);
     assert.equal(f.eligibilityDate, "2026-10-10");
-    assert.equal(f.touchesSinceEligibility, 1);
+    assert.equal(f.touchesSinceEligibility, 1); // another SDR's touch before allocation is not credited
     assert.equal(f.touchesPostEvent, 2);
     assert.equal(f.touchesSinceAllocation, 1);
   });

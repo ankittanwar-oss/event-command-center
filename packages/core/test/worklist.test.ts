@@ -116,3 +116,13 @@ test("a HubSpot task due today is the primary action even with an account-level 
   const noTask = actionStatus(computeLeadFacts(dataset({ acts: [act({ ts: "2026-10-26" })], deals: [deal({ contactIds: [] })] }), R, T)[0]!, T, R);
   assert.equal(noTask.label, "Review next action"); assert.equal(noTask.color, "grey");
 });
+
+test("current SDR's own touches before a later allocation date count; another SDR's do not", () => {
+  // event Oct 1, allocation stamped Oct 27; Bobbi (current SDR) emailed Oct 21, Disha emailed Oct 20
+  const ds = dataset({ companies: [company({ allocationDate: "2026-10-27" })], acts: [act({ ts: "2026-10-21" }), act({ ts: "2026-10-20", ownerId: DISHA })] });
+  const f = computeLeadFacts(ds, R, T)[0]!;
+  assert.equal(f.eligibilityDate, "2026-10-27");
+  assert.equal(f.touchesSinceEligibility, 1);
+  assert.equal(f.status === "never_worked", false);
+  assert.equal(f.firstTouchSlaMet, true);
+});

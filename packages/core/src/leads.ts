@@ -164,7 +164,10 @@ export function computeLeadFact(
   const postEventStart = ev.date ? addDays(ev.date, rules.postEventStartOffsetDays) : null;
   const touches = contactTouches(contactActs, contact.id, sdr, rules);
   const day = (t: { timestamp: string }) => toDate(t.timestamp)!;
-  const sinceElig = eligibilityDate ? touches.filter((t) => day(t) >= eligibilityDate) : [];
+  // Touches since eligibility. The CURRENT SDR's own touches also count from the event date when their allocation
+  // date was stamped later (same person working the lead before the allocation date). Other SDRs' touches before
+  // the allocation date are still excluded, so a reassigned account is never credited with a previous SDR's work.
+  const sinceElig = eligibilityDate ? touches.filter((t) => day(t) >= eligibilityDate || (!!sdr && t.ownerId === sdr && !!ev.date && day(t) >= ev.date)) : [];
   const postEvent = postEventStart ? touches.filter((t) => day(t) >= postEventStart).length : 0;
   const sinceAlloc = allocationDate ? touches.filter((t) => day(t) >= allocationDate).length : null;
   const first30 = eligibilityDate ? sinceElig.filter((t) => daysBetween(eligibilityDate, day(t)) < 30).length : 0;
@@ -179,7 +182,7 @@ export function computeLeadFact(
   const rule = rules.cadence[temperature ?? "Warm"];
   const ageDays = eligibilityDate && eligibilityDate <= today ? daysBetween(eligibilityDate, today) : eligibilityDate ? 0 : null;
   const bizSinceElig = eligibilityDate && eligibilityDate <= today ? businessDaysBetween(eligibilityDate, today, rules.businessCalendar) : eligibilityDate ? 0 : null;
-  const bizToFirst = eligibilityDate && firstTouchAt ? businessDaysBetween(eligibilityDate, toDate(firstTouchAt)!, rules.businessCalendar) : null;
+  const bizToFirst = eligibilityDate && firstTouchAt ? (toDate(firstTouchAt)! < eligibilityDate ? 0 : businessDaysBetween(eligibilityDate, toDate(firstTouchAt)!, rules.businessCalendar)) : null;
   const bizSinceLast = lastTouchAt ? businessDaysBetween(toDate(lastTouchAt)!, today, rules.businessCalendar) : null;
   const expected = ageDays === null ? 0 : expectedTouches(ageDays, rule);
 
