@@ -237,4 +237,11 @@ describe("API views", () => {
     assert.doesNotThrow(() => views.depth(facts, new URLSearchParams("window=allocation"), "2026-10-30", DEFAULT_RULES));
     assert.doesNotThrow(() => views.accounts(facts, new URLSearchParams(""), "2026-10-30", DEFAULT_RULES));
   });
+  test("daily command centre: every eligible account appears once, in exactly one timeliness group", () => {
+    const d = views.daily(facts, new URLSearchParams("quarter=all"), "2026-10-30", DEFAULT_RULES);
+    const eligibleAccounts = new Set(facts.filter((f: any) => f.eligible).map((f: any) => f.companyId ?? `c:${f.contactId}`));
+    assert.equal(d.total, eligibleAccounts.size);
+    assert.equal(Object.values(d.summary.groups).reduce((a: number, b: any) => a + b, 0), d.total);
+    assert.equal(d.bySdr.reduce((a: number, r: any) => a + r.accounts, 0), d.total);
+  });
 });

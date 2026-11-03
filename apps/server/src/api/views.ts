@@ -265,3 +265,72 @@ export function metaFor(facts: LeadFact[], today: string) {
 
 export const sdrName = (id: string | null) => (id ? rosterById.get(id)?.name ?? null : null);
 export type { NormalizedFilters };
+
+// ---------------------------------------------------------------------------------------------------------------
+// Daily Command Centre: every eligible event ACCOUNT per SDR, judged on timeliness. Built from the live synced
+// lead facts (same eligibility, touch and SLA rules as every other view); nothing here is a separate snapshot.
+// ---------------------------------------------------------------------------------------------------------------
+const DAILY_GROUPS = [
+  { key: "respond", label: "Respond now", hint: "Prospect replied after the SDR's last touch", cls: "crit" },
+  { key: "overdue", label: "First touch overdue", hint: "No SDR touch on the account and the first-touch SLA has passed", cls: "crit" },
+  { key: "stalled", label: "Stalled", hint: "Worked, but no touch beyond the stall threshold", cls: "crit" },
+  { key: "due", label: "Due now", hint: "First touch due today, or follow-up below the expected cadence", cls: "warnr" },
+  { key: "ontrack", label: "On track", hint: "Being worked within cadence", cls: "ok" },
+  { key: "inplay", label: "In play", hint: "Meeting, open opportunity or DQ", cls: "neu" },
+  { key: "notdue", label: "Not yet due", hint: "Inside the first-touch window, recently closed lost, or unverified", cls: "neu" },
+] as const;
+
+export function daily(facts: LeadFact[], q: URLSearchParams, today: string, rules: Rules = DEFAULT_RULES) {
+  const { nf, rows } = filtered(facts, q, today);
+  const accts = accountQueue(rows, rules).map((a) => {
+    const leads = a.contacts;
+    const day = (x: string | null | undefined) => (x ? x.slice(0, 10) : null);
+    const eligibleSince = leads.map((l) => l.eligibilityDate).filter(Boolean).sort()[0] ?? null;
+    const firstTouch = leads.map((l) => l.firstTouchAt).filter(Boolean).sort()[0] ?? null;
+    const lastTouch = a.lastTouch;
+    const replyDates = leads.map((l) => /Prospect replied on (\d{4}-\d{2}-\d{2})/.exec(l.inPlayReason ?? "")?.[1]).filter(Boolean) as string[];
+    const lastReply = replyDates.sort().pop() ?? null;
+    const risks = leads.map((l) => riskOf(l, rules)?.level ?? null);
+    const touchedLeads = leads.filter((l) => l.touchesSinceEligibility > 0);
+    const daysToFirst = touchedLeads.map((l) => l.businessDaysToFirstTouch).filter((x): x is number => x !== null);
+    const slaDays = rules.cadence[a.temperature as "Hot" | "Warm"].firstTouchBusinessDays;
+    let group: (typeof DAILY_GROUPS)[number]["key"];
+    if (lastReply && (!lastTouch || day(lastTouch)! < lastReply)) group = "respond";
+    else if (!firstTouch && leads.some((l) => l.status === "never_worked" && l.firstTouchOverdue)) group = "overdue";
+    else if (leads.some((l) => l.status === "stalled")) group = "stalled";
+    else if (risks.includes("at_risk")) group = "due";
+    else if (leads.some((l) => l.status === "in_play")) group = "inplay";
+    else if (risks.includes("healthy")) group = "ontrack";
+    else group = "notdue";
+    const daysSinceLast = lastTouch ? Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(lastTouch)) / 86_400_000) : null;
+    return {
+      companyId: a.companyId, companyName: a.companyName, sdrOwnerId: a.sdrOwnerId, sdrName: a.sdrName, temperature: a.temperature, icpTier: a.icpTier,
+      events: a.events, eligibleSince, firstTouch, lastTouch, daysSinceLast, lastReply,
+      businessDaysToFirstTouch: daysToFirst.length ? Math.min(...daysToFirst) : null,
+      firstTouchWithinSla: daysToFirst.length ? Math.min(...daysToFirst) <= slaDays : leads.some((l) => l.firstTouchOverdue) ? false : null,
+      touches: a.touches, contactsWorked: a.contactsWorked, eligibleContacts: a.eligibleContacts,
+      nextTask: leads.map((l) => l.nextTaskDue).filter(Boolean).sort()[0] ?? null,
+      dealStatus: accountDeals(leads).filter((d) => d.via !== "duplicate_company")[0]?.status ?? "none",
+      group, nextAction: a.nextAction,
+      contacts: leads.map((l) => withRisk(l, rules)),
+    };
+  });
+  const urg = Object.fromEntries(DAILY_GROUPS.map((g, i) => [g.key, i]));
+  accts.sort((x, y) => urg[x.group]! - urg[y.group]! || (x.temperature === "Hot" ? -1 : 1) - (y.temperature === "Hot" ? -1 : 1) || (y.daysSinceLast ?? 999) - (x.daysSinceLast ?? 999));
+
+  const summarise = (list: typeof accts) => {
+    const decided = list.filter((x) => x.firstTouchWithinSla !== null);
+    const days = list.map((x) => x.businessDaysToFirstTouch).filter((x): x is number => x !== null).sort((a, b) => a - b);
+    return {
+      accounts: list.length,
+      hot: list.filter((x) => x.temperature === "Hot").length,
+      worked: list.filter((x) => x.firstTouch).length,
+      withinSlaPct: decided.length ? Math.round((decided.filter((x) => x.firstTouchWithinSla).length / decided.length) * 1000) / 10 : null,
+      medianDaysToFirst: days.length ? days[Math.floor(days.length / 2)]! : null,
+      touchedLast7: list.filter((x) => x.daysSinceLast !== null && x.daysSinceLast <= 7).length,
+      groups: Object.fromEntries(DAILY_GROUPS.map((g) => [g.key, list.filter((x) => x.group === g.key).length])),
+    };
+  };
+  const bySdr = sdrTable(rows, nf).map((s) => ({ ownerId: s.ownerId, name: s.name, region: s.region, ...summarise(accts.filter((a) => a.sdrOwnerId === s.ownerId)) }));
+  return { filters: nf, groups: DAILY_GROUPS, summary: summarise(accts), bySdr, accounts: accts.slice(0, 1500), total: accts.length };
+}

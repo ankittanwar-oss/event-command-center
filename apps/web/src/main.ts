@@ -8,12 +8,15 @@ import { overviewView } from "./views/overview.js";
 import { performanceView } from "./views/performance.js";
 import { qualityView } from "./views/quality.js";
 import { sdrView } from "./views/sdr.js";
+import { dailyView } from "./views/daily.js";
+
 
 const VIEWS: Record<string, { label: string; title: string; render: (r: Route, meta: any) => Promise<HTMLElement>; filters: boolean }> = {
   overview: { label: "CMO overview", title: "CMO overview", render: overviewView, filters: true },
   sdr: { label: "SDR execution", title: "SDR execution", render: sdrView, filters: true },
   events: { label: "Event operations", title: "Event operations", render: eventsView, filters: true },
   performance: { label: "Event performance", title: "Event performance", render: performanceView, filters: true },
+  daily: { label: "Daily Command Centre", title: "Daily Command Centre", render: dailyView, filters: true },
   quality: { label: "Data quality", title: "Data quality", render: qualityView, filters: true },
   admin: { label: "Admin", title: "Admin & diagnostics", render: adminView, filters: false },
 };

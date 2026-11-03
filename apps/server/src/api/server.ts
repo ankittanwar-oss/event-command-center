@@ -56,6 +56,7 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL) {
       case "/api/overview": return send(res, 200, v.overview(s.facts, q, t, rules));
       case "/api/leads": return send(res, 200, v.leads(s.facts, q, t, rules));
       case "/api/sdr": return send(res, 200, v.sdrs(s.facts, q, t, rules));
+      case "/api/daily": return send(res, 200, v.daily(s.facts, q, t, rules));
       case "/api/depth": return send(res, 200, v.depth(s.facts, q, t, rules));
       case "/api/accounts": return send(res, 200, v.accounts(s.facts, q, t, rules));
       case "/api/events": return send(res, 200, v.events(s.facts, q, t, rules));
@@ -164,10 +165,11 @@ function serveStatic(res: ServerResponse, pathname: string) {
   let file = path.join(dist, safe);
   if (!file.startsWith(dist) || !existsSync(file) || statSync(file).isDirectory()) file = path.join(dist, "index.html");
   const ext = path.extname(file);
+  const headers = SECURITY_HEADERS;
   res.writeHead(200, {
     "Content-Type": MIME[ext] ?? "application/octet-stream",
     "Cache-Control": ext === ".html" ? "no-cache" : "public, max-age=300",
-    ...SECURITY_HEADERS,
+    ...headers,
   });
   res.end(readFileSync(file));
 }
