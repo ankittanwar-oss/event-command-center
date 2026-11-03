@@ -215,6 +215,17 @@ export interface LeadFact {
   /** Every qualifying contact touch (any date), used for allocation / event / reporting-period windows. */
   allTouchDates?: string[];
   allTouchIds?: string[];
+  /** Daily worklist context (optional: absent on snapshots computed before this field existed). */
+  lastReplyAt?: string | null;          // latest prospect reply since eligibility
+  lastOutboundAt?: string | null;       // latest outbound email/call/meeting by anyone (SDR, AE, other)
+  lastOutboundOwnerId?: string | null;
+  lastMeetingAt?: string | null;
+  currentSdrTouches?: number | null;    // touches by the CURRENT SDR since allocation (previous SDRs not credited)
+  otherSdrTouches?: number;             // touches by other roster SDRs (context for reassigned accounts)
+  lastTouchOwnerId?: string | null;
+  nextTaskSubject?: string | null;
+  nextTaskOwnerId?: string | null;
+  slaApplies?: boolean;
   dataQuality: string[];
   priority: number;                   // higher = more urgent
 }

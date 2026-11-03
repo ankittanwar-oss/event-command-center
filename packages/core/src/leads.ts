@@ -223,6 +223,21 @@ export function computeLeadFact(
   openTasks.sort((a, b) => a.dueDate!.localeCompare(b.dueDate!));
   const futureMeeting = contactActs.some((a) => a.kind === "MEETING" && toDate(a.timestamp)! > today);
   const nextTaskDue = openTasks[0]?.dueDate ?? null;
+  const nextTask = openTasks[0] ?? null;
+
+  // ---- daily-worklist facts (context only: they do not change status, SLA or any reported metric)
+  const maxTs = (xs: Activity[]) => xs.map((a) => a.timestamp).sort().pop() ?? null;
+  const lastReplyAt = eligibilityDate ? maxTs(contactActs.filter((a) => a.kind === "INCOMING_EMAIL" && toDate(a.timestamp)! >= eligibilityDate)) : null;
+  // Any outbound response by anyone (SDR, AE or other), so a reply already answered by an AE is not shown as waiting.
+  const outbound = contactActs.filter((a) => (a.kind === "EMAIL" && (a.direction || "EMAIL").toUpperCase() === "EMAIL") ||
+    (a.kind === "CALL" && (a.direction || "").toUpperCase() !== "INBOUND") || a.kind === "MEETING");
+  outbound.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+  const lastOutbound = outbound[outbound.length - 1] ?? null;
+  const lastMeetingAt = maxTs(contactActs.filter((a) => a.kind === "MEETING" && toDate(a.timestamp)! <= today));
+  const sdrFrom = allocationDate ?? eligibilityDate;
+  const currentSdrTouches = sdr && sdrFrom ? touches.filter((t) => t.ownerId === sdr && day(t) >= sdrFrom).length : null;
+  const otherSdrTouches = touches.filter((t) => t.ownerId !== sdr).length;
+  const lastTouchOwnerId = sinceElig.length ? sinceElig[sinceElig.length - 1]!.ownerId : null;
 
   // ---- status
   let status: FollowUpStatus;
@@ -297,6 +312,9 @@ export function computeLeadFact(
     maxGapDays: gaps.length ? Math.max(...gaps) : null,
     daysSinceLastTouch: lastTouchAt ? daysBetween(toDate(lastTouchAt)!, today) : null,
     businessDaysToFirstTouch: bizToFirst, businessDaysSinceEligibility: bizSinceElig,
+    lastReplyAt, lastOutboundAt: lastOutbound?.timestamp ?? null, lastOutboundOwnerId: lastOutbound?.ownerId ?? null, lastMeetingAt,
+    currentSdrTouches, otherSdrTouches, lastTouchOwnerId,
+    nextTaskSubject: nextTask?.subject ?? null, nextTaskOwnerId: nextTask?.ownerId ?? null, slaApplies: !noSla,
     firstTouchSlaMet: noSla ? null : slaMet, firstTouchOverdue: noSla ? false : overdue, expectedTouches: expected,
     insufficientFollowUp: insufficient, multiWeek: weeks.size >= rules.multiWeekMinWeeks,
     nextTaskDue, hasNextStep: openTasks.length > 0 || futureMeeting,
