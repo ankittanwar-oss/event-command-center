@@ -368,3 +368,13 @@ tr.row-crit td { background: color-mix(in srgb, var(--crit-soft) 40%, transparen
 .cmeta { font-size: 12px; color: var(--muted); min-width: 90px; }
 .crow .dcontacts { display: none; padding: 0 0 8px; background: var(--sunken); } .crow.open .dcontacts { display: block; }
 @media (max-width: 800px) { .ctiles { grid-template-columns: 1fr; } .csdr { width: auto; } }
+
+/* CMO SDR scorecard */
+.scard { margin-bottom: 14px; }
+.sctable { table-layout: auto; } .sctable td, .sctable th { padding: 8px 8px; } .sctable th { white-space: nowrap; font-size: 11px; }
+.sctable td.sc { text-align: center; font-weight: 650; font-variant-numeric: tabular-nums; cursor: pointer; border-left: 2px solid var(--panel); }
+.sctable th.n { text-align: center; }
+.sc-g { background: #dcf5e6; color: #05603a; } .sc-a { background: #fef0c7; color: #93370d; } .sc-r { background: #fee4e2; color: #b42318; }
+.sc-n { color: var(--muted); }
+.sctable td.sc:hover { filter: brightness(.96); }
+@media (prefers-color-scheme: dark) { .sc-g { background: #0f3a24; color: #75e0a7; } .sc-a { background: #4a3510; color: #fec84b; } .sc-r { background: #4a1714; color: #fda29b; } }

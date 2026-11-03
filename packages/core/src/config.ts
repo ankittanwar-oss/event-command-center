@@ -66,6 +66,8 @@ export interface Rules {
   requireHotWarm: boolean;
   /** Pod routing: company owner (AE) id -> pod SDR id. If the company's SDR Owner is not one of these pod SDRs, the pod SDR owns it. */
   podAeToSdr: Record<string, string>;
+  /** CMO scorecard thresholds: [green at or better than, amber at or better than]; worse is red. */
+  scorecardTargets: Record<string, { green: number; amber: number; higherIsBetter: boolean }>;
   /** Open deals in these stages (case-insensitive substring of the stage label) do NOT put a lead "in play". */
   inactiveDealStages: string[];
   /** Deals whose name matches this pattern (e.g. test records) are ignored entirely. */
@@ -116,6 +118,15 @@ export const DEFAULT_RULES: Rules = {
   roundtableSheet: { authoritative: true },
   excludedCompanies: ["The Channel Company"],
   requireHotWarm: false,
+  scorecardTargets: {
+    coverage: { green: 80, amber: 50, higherIsBetter: true },        // % of eligible leads touched at least once
+    sla: { green: 80, amber: 60, higherIsBetter: true },             // % first touch within SLA
+    avgTouches: { green: 4, amber: 2, higherIsBetter: true },        // avg qualifying touches per lead
+    atTarget: { green: 50, amber: 25, higherIsBetter: true },        // % of leads at 6+ touches
+    oneTouch: { green: 20, amber: 40, higherIsBetter: false },       // % of leads with exactly one touch
+    multiWeek: { green: 60, amber: 30, higherIsBetter: true },       // % worked in 2+ weeks (leads 14+ days old)
+    overdue: { green: 0, amber: 5, higherIsBetter: false },          // leads past first-touch SLA, no outreach
+  },
   podAeToSdr: {
     "79976078": "87607260",   // Allison Green   -> Bobbi Bukovac
     "95421364": "92977365",   // Andrew Ketler   -> Danielle Shannon

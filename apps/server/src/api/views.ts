@@ -136,6 +136,7 @@ export function overview(facts: LeadFact[], q: URLSearchParams, today: string, r
     focus: top,
     depth: Object.fromEntries(sdrTable(rows, nf).map((s) => [s.ownerId, sdrDepth(rows, s.ownerId, rules, "eligibility", nf.quarterRange).all])),
     touchTarget: rules.touchTarget,
+    scorecardTargets: rules.scorecardTargets,
     dealContext: dealContext(rows, today),
     narrative: narrative(rows, rules, top),
     slaDays: { Hot: rules.cadence.Hot.firstTouchBusinessDays, Warm: rules.cadence.Warm.firstTouchBusinessDays },
