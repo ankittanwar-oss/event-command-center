@@ -85,3 +85,23 @@ test("SLA start date affects only the first-touch SLA, not follow-up cadence", (
   assert.equal(f.insufficientFollowUp, true);
   assert.equal(riskOf(f, r)?.level, "at_risk");
 });
+
+describe("14-business-day inactivity", () => {
+  test("touched: counts from the last touch; never touched: from eligibility; not an SLA", async () => {
+    const { inactivity } = await import("../src/index.js");
+    const f = computeLeadFacts(dataset({ acts: [act({ ts: "2026-10-05" })] }), R, T)[0]!;
+    const ia = inactivity(f, T, R);
+    assert.equal(ia.since, "2026-10-05"); assert.equal(ia.stale, true); assert.equal(ia.kind, "sdr_action");
+    const n = computeLeadFacts(dataset({ events: [event({ date: "2026-10-20" })] }), R, T)[0]!;
+    assert.equal(inactivity(n, T, R).stale, false);
+    const opp = computeLeadFacts(dataset({ acts: [act({ ts: "2026-10-05" })], deals: [deal()] }), R, T)[0]!;
+    assert.equal(inactivity(opp, T, R).kind, "ae_or_pause");
+  });
+  test("overdue source is named: cadence vs task", async () => {
+    const { overdueSource } = await import("../src/index.js");
+    const c = leadWork(computeLeadFacts(dataset({ acts: [act({ ts: "2026-10-05" })] }), R, T)[0]!, T, R);
+    assert.match(overdueSource(c)!.label, /^Follow-up cadence overdue by \d+ business day/);
+    const ds = dataset({ acts: [act({ ts: "2026-10-26" })], tasks: [{ id: "t", dueDate: "2026-10-26T00:00:00Z", status: "NOT_STARTED", taskType: "CALL", ownerId: BOBBI, subject: "Call", contactIds: ["c1"] }] });
+    assert.equal(overdueSource(leadWork(computeLeadFacts(ds, R, T)[0]!, T, R))!.label, "HubSpot task overdue by 4 business days");
+  });
+});

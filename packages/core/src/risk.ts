@@ -27,7 +27,7 @@ export const RISK_LABEL: Record<RiskLevel, string> = {
   critical: "Critical",
   at_risk: "At risk",
   healthy: "Healthy",
-  neutral: "Not yet due / unverified",
+  neutral: "Not judged (see reason)",
 };
 
 export function riskOf(f: LeadFact, rules: Rules): { level: RiskLevel; reason: string } | null {

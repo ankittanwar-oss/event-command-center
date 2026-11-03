@@ -9,6 +9,7 @@ export const WORK_SECTIONS = [
   { key: "respond", label: "Respond now", hint: "A prospect replied and nobody has answered since" },
   { key: "overdue", label: "Overdue", hint: "First outreach past the SLA, or a follow-up past its due date" },
   { key: "today", label: "Due today", hint: "First outreach or follow-up due today" },
+  { key: "stale", label: "No touch in 14+ business days", hint: "Still actionable, no deadline breached, but no SDR touch for 14+ business days" },
   { key: "upcoming", label: "Upcoming", hint: "Due on a later date (shown on each row)" },
   { key: "monitor", label: "In play / Monitor", hint: "Open opportunity, meeting, paused, cadence complete, or needs review" },
 ] as const;
@@ -26,7 +27,7 @@ export interface WorkItem {
   lead: LeadFact;
 }
 
-const ORDER: Record<WorkSection, number> = { respond: 0, overdue: 1, today: 2, upcoming: 3, monitor: 4 };
+const ORDER: Record<WorkSection, number> = { respond: 0, overdue: 1, today: 2, stale: 3, upcoming: 4, monitor: 5 };
 
 export function addBusinessDays(day: string, n: number, rules: Rules): string {
   let d = day;
@@ -172,7 +173,8 @@ function rank(w: WorkItem): number[] {
   const eng = verifiedEngagement(w.lead) ? 0 : w.lead.attendance === "attended" ? 1 : 2;
   const temp = w.lead.temperature === "Hot" ? 0 : w.lead.temperature === "Warm" ? 1 : 2;
   const dueKey = w.due ? Date.parse(w.due) / 86_400_000 : 1e9;
-  return [ORDER[w.section], dueKey, temp, eng, -w.lead.priority];
+  const src = w.dueSource === "reply" || w.dueSource === "task" ? 0 : w.dueSource === "sla" ? 1 : 2;
+  return [ORDER[w.section], w.section === "overdue" ? src : 0, dueKey, temp, eng, -w.lead.priority];
 }
 function cmp(a: number[], b: number[]) { for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i]! - b[i]!; return 0; }
 
@@ -183,6 +185,12 @@ export function worklist(rows: LeadFact[], today: string, rules: Rules) {
     if (!f.eligible) continue;
     const key = f.companyId ?? `contact:${f.contactId}`;
     (byAcct.get(key) ?? byAcct.set(key, []).get(key)!).push(leadWork(f, today, rules));
+  }
+  // Stale but still actionable (no reply/overdue/today action): surface after due-today, never as red.
+  for (const ws of byAcct.values()) for (const w of ws) {
+    if (w.section !== "upcoming" && !(w.section === "monitor" && w.action === "Needs review")) continue;
+    const ia = inactivity(w.lead, today, rules);
+    if (ia.stale && ia.kind === "sdr_action") Object.assign(w, { section: "stale", why: `${w.why} · no SDR touch for ${ia.businessDays} business days` });
   }
   // Follow-ups are an account-level rhythm: a recent SDR touch on another contact at the same account resets the
   // follow-up clock for the account (no deadline is moved earlier; it can only move to a later, verified touch).
@@ -248,4 +256,51 @@ export function outreachTimeliness(f: LeadFact, today: string, rules: Rules) {
     else followUp = "unverified";
   }
   return { firstTouch, followUp };
+}
+
+
+// ---------------------------------------------------------------------------------------------------------------
+// Engagement consistency: "No touch in N business days" (default 14). An indicator, not an SLA.
+//   touched:     business days since the last qualifying SDR touch (since eligibility)
+//   never touched: business days since the eligibility date (later of event date and current SDR allocation)
+// ---------------------------------------------------------------------------------------------------------------
+export type InactivityKind = "sdr_action" | "ae_or_pause" | "review";
+export function inactivity(f: LeadFact, today: string, rules: Rules): { businessDays: number | null; stale: boolean; kind: InactivityKind | null; since: string | null } {
+  if (!f.eligible) return { businessDays: null, stale: false, kind: null, since: null };
+  const since = f.touchesSinceEligibility > 0 ? toDate(f.lastTouchAt) : f.eligibilityDate;
+  if (!since || since > today) return { businessDays: null, stale: false, kind: null, since };
+  const bd = businessDaysBetween(since, today, rules.businessCalendar);
+  const stale = bd >= (rules.inactivityBusinessDays ?? 14);
+  let kind: InactivityKind = "sdr_action";
+  const r = f.inPlayReason ?? "";
+  if (f.status === "recently_lost" || (f.status === "in_play" && !/^Prospect replied/.test(r))) kind = "ae_or_pause";
+  else if (f.status === "unverifiable") kind = "review";
+  return { businessDays: bd, stale, kind: stale ? kind : null, since };
+}
+
+/** Where an overdue deadline comes from, in words, e.g. "HubSpot task overdue by 4 business days". */
+export function overdueSource(w: WorkItem): { source: "task" | "first_touch_sla" | "cadence" | "reply"; label: string } | null {
+  if (w.section !== "overdue" && !(w.section === "respond" && (w.overdueBusinessDays ?? 0) > 0)) return null;
+  const n = w.overdueBusinessDays ?? 0;
+  const bd = `${n} business day${n === 1 ? "" : "s"}`;
+  switch (w.dueSource) {
+    case "task": return { source: "task", label: `HubSpot task overdue by ${bd}` };
+    case "sla": return { source: "first_touch_sla", label: `First-touch SLA breached by ${bd}` };
+    case "reply": return { source: "reply", label: `Prospect reply unanswered, ${bd} past the 1-business-day response` };
+    case "cadence": return { source: "cadence", label: `Follow-up cadence overdue by ${bd} (no touch beyond the stall limit)` };
+    default: return null;
+  }
+}
+
+/** Why a lead has (or has no) verified deadline: replaces the blended "Not yet due / unverified". */
+export type DeadlineState = "verified" | "not_yet_due" | "no_deadline" | "commercial" | "paused" | "missing_data";
+export function deadlineState(f: LeadFact, today: string, rules: Rules): DeadlineState | null {
+  if (!f.eligible) return null;
+  const w = leadWork(f, today, rules);
+  if (w.section === "respond" || w.section === "overdue" || w.section === "today") return "verified";
+  if (w.section === "upcoming") return "not_yet_due";
+  if (f.status === "in_play" && f.inPlayReason !== "Disqualified") return "commercial";
+  if (f.status === "recently_lost" || f.inPlayReason === "Disqualified" || w.action === "Review next step") return "paused";
+  if (f.status === "unverifiable" || !f.eligibilityDate || (f.touchesSinceEligibility > 0 && !f.lastTouchAt)) return "missing_data";
+  return "no_deadline";
 }

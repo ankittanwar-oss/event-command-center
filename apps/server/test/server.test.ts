@@ -247,6 +247,8 @@ describe("API views", () => {
     assert.equal(drill("multi_touch"), a.multi);
     for (const k of Object.keys(a.ft)) assert.equal(drill(`ft_${k}`), a.ft[k]);
     for (const k of Object.keys(a.fu)) assert.equal(drill(`fu_${k}`), a.fu[k]);
+    for (const k of Object.keys(a.k)) assert.equal(drill(`cmo_${k}`), a.k[k], k);
+    assert.equal((a.k.t_fu_overdue ?? 0), (a.k.t_fu_overdue_task ?? 0) + (a.k.t_fu_overdue_cadence ?? 0) + (a.k.t_fu_overdue_reply ?? 0));
     // first-touch groups cover every eligible lead; follow-up groups cover every touched lead
     assert.equal(Object.values(a.ft).reduce((x: number, y: any) => x + y, 0), a.leads);
     assert.equal(Object.values(a.fu).reduce((x: number, y: any) => x + y, 0), a.touched);

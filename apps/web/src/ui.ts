@@ -75,7 +75,7 @@ export const RISK: Record<Risk, { label: string; icon: string; cls: string }> = 
   critical: { label: "Critical", icon: "▲", cls: "crit" },
   at_risk: { label: "At risk", icon: "◆", cls: "warnr" },
   healthy: { label: "Healthy", icon: "●", cls: "ok" },
-  neutral: { label: "Not yet due", icon: "○", cls: "neu" },
+  neutral: { label: "Not judged", icon: "○", cls: "neu" },
 };
 export function riskPill(level: string | null | undefined, label?: string, title?: string) {
   if (!level || !(level in RISK)) return h("span", { class: "rp neu", title: title ?? "Not eligible for follow-up" }, h("i", null, "–"), label ?? "Not eligible");

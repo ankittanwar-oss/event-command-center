@@ -1,6 +1,6 @@
 import {
   accountQueue, applyFilters, BUCKETS, categoryBreakdown, CATEGORY_LABEL, dataQuality, eventSummaries, fiscalQuarterOf, inBucket, nextAction,
-  normalizeFilters, parseQuarterKey, worklist, leadDimensions, ACTION_HEALTH_LABEL, outreachTimeliness, DEFAULT_RULES, dealOrder, type DealRef, depthStats, sdrDepth, accountDepth, WINDOW_LABEL, BANDS, type TouchWindow, findings, narrative, RISK_LABEL, riskCounts, riskOf, sdrRisk, previousQuarter, qoq, quarterMetrics, regionBreakdown, rosterById, SDR_ROSTER, sdrTable, STATUS_LABEL, temperatureSummary,
+  normalizeFilters, parseQuarterKey, worklist, leadDimensions, ACTION_HEALTH_LABEL, outreachTimeliness, inactivity, overdueSource, deadlineState, leadWork, contactLevelInPlay, DEFAULT_RULES, dealOrder, type DealRef, depthStats, sdrDepth, accountDepth, WINDOW_LABEL, BANDS, type TouchWindow, findings, narrative, RISK_LABEL, riskCounts, riskOf, sdrRisk, previousQuarter, qoq, quarterMetrics, regionBreakdown, rosterById, SDR_ROSTER, sdrTable, STATUS_LABEL, temperatureSummary,
   type EventCategory, type Filters, type LeadFact, type NormalizedFilters, type Region, type Rules,
 } from "@ecc/core";
 
@@ -40,7 +40,12 @@ export function filtered(facts: LeadFact[], q: URLSearchParams, today: string, o
 function withRisk(f: LeadFact, rules: Rules, today?: string) {
   const r = riskOf(f, rules);
   const dm = today && f.eligible ? leadDimensions(f, today, rules) : null;
-  const dims = dm ? { sla: dm.sla, depth: dm.depth, followUp: dm.followUp, cadence: dm.cadence, health: dm.health, healthLabel: ACTION_HEALTH_LABEL[dm.health] } : null;
+  const ia = dm ? inactivity(f, today!, rules) : null;
+  const ds = dm ? deadlineState(f, today!, rules) : null;
+  const dims = dm ? { sla: dm.sla, depth: dm.depth, followUp: dm.followUp, cadence: dm.cadence, health: dm.health, healthLabel: ACTION_HEALTH_LABEL[dm.health],
+    overdue: overdueSource(dm.work)?.label ?? null, dueSource: dm.work.dueSource, due: dm.work.due,
+    inactiveDays: ia?.businessDays ?? null, inactiveSince: ia?.since ?? null, stale: ia?.stale ?? false, staleKind: ia?.kind ?? null,
+    deadline: ds, deadlineLabel: ds ? ({ verified: "Verified deadline", not_yet_due: "Not yet due", no_deadline: "No verified deadline", commercial: "Active commercial engagement", paused: "Paused / not actionable", missing_data: "Missing data" } as Record<string, string>)[ds] : null } : null;
   const label = f.status === "in_play" && f.touchesSinceEligibility === 0 ? "In play – no SDR touch" : STATUS_LABEL[f.status];
   return { ...f, dims, nextAction: nextAction(f, rules), statusLabel: label, risk: r?.level ?? null, riskLabel: r ? RISK_LABEL[r.level] : null, riskReason: r?.reason ?? null };
 }
@@ -49,6 +54,7 @@ function withRisk(f: LeadFact, rules: Rules, today?: string) {
 function matches(f: LeadFact, bucket: string, rules: Rules, today = ""): boolean {
   if (bucket.startsWith("risk_")) return riskOf(f, rules)?.level === bucket.slice(5);
   // Dimension buckets: health_<key>, depth_<band>, follow_overdue, follow_due (eligible leads only)
+  if (bucket.startsWith("cmo_")) return cmoKeys(f, today, rules).includes(bucket.slice(4));
   if (bucket.startsWith("ft_") || bucket.startsWith("fu_")) {
     const t = outreachTimeliness(f, today, rules);
     return bucket.startsWith("ft_") ? t.firstTouch === bucket.slice(3) : t.followUp === bucket.slice(3);
@@ -109,12 +115,38 @@ export function depth(facts: LeadFact[], q: URLSearchParams, today: string, rule
   };
 }
 
+/** Every CMO metric key a lead belongs to (same function drives counts and drill-downs). */
+export function cmoKeys(f: LeadFact, today: string, rules: Rules): string[] {
+  const k: string[] = [];
+  if (!f.eligible) {
+    if (f.ineligibleReason === "No SDR assigned" || f.ineligibleReason === "SDR not on approved roster") k.push("x_missing_owner");
+    return k;
+  }
+  const t = outreachTimeliness(f, today, rules);
+  const w = leadWork(f, today, rules);
+  const src = overdueSource(w)?.source;
+  if (t.firstTouch === "overdue") k.push("t_ft_breach");
+  if (f.touchesSinceEligibility > 0 && (src === "task" || src === "cadence" || src === "reply")) k.push("t_fu_overdue", `t_fu_overdue_${src}`);
+  if (t.firstTouch === "today" || t.followUp === "today") k.push("t_due_today");
+  if (t.firstTouch === "upcoming" || t.followUp === "upcoming") k.push("t_upcoming");
+  if ((t.firstTouch === "today" || t.firstTouch === "upcoming")) k.push("recent");
+  const ia = inactivity(f, today, rules);
+  if (ia.stale) k.push("stale", `stale_${ia.kind}`);
+  const ds = deadlineState(f, today, rules);
+  if (ds) k.push(`dl_${ds}`);
+  if (ds === "no_deadline") k.push("x_no_deadline");
+  if (f.status === "unverifiable") k.push("x_unverified_activity");
+  if (f.status === "in_play" && /^Open opportunity/.test(f.inPlayReason ?? "") && !contactLevelInPlay(f)) k.push("x_uncertain_handoff");
+  return k;
+}
+
 export function dimCounts(list: LeadFact[], today: string, rules: Rules) {
   const c = { leads: list.length, touched: 0, multi: 0, slaMet: 0, slaMissed: 0, firstOverdue: 0, followOverdue: 0, followDue: 0,
     health: { overdue: 0, due_today: 0, upcoming: 0, not_yet_due: 0, on_track: 0, unverified: 0 } as Record<string, number>,
     depth: { "0": 0, "1": 0, "2–3": 0, "4–5": 0, "6–7": 0, "8+": 0 } as Record<string, number>,
     ft: { ontime: 0, late: 0, today: 0, upcoming: 0, overdue: 0, no_deadline: 0 } as Record<string, number>,
-    fu: { today: 0, upcoming: 0, overdue: 0, unverified: 0, complete: 0 } as Record<string, number> };
+    fu: { today: 0, upcoming: 0, overdue: 0, unverified: 0, complete: 0 } as Record<string, number>,
+    k: {} as Record<string, number> };
   for (const f of list) {
     const d = leadDimensions(f, today, rules);
     if (f.touchesSinceEligibility > 0) c.touched++;
@@ -125,6 +157,7 @@ export function dimCounts(list: LeadFact[], today: string, rules: Rules) {
     if (f.touchesSinceEligibility > 0 && d.health === "overdue") c.followOverdue++;
     if (f.touchesSinceEligibility > 0 && d.health === "due_today") c.followDue++;
     c.health[d.health]!++; c.depth[d.depth]!++;
+    for (const key of cmoKeys(f, today, rules)) c.k[key] = (c.k[key] ?? 0) + 1;
     const t = outreachTimeliness(f, today, rules);
     if (t.firstTouch) c.ft[t.firstTouch]!++;
     if (t.followUp) c.fu[t.followUp]!++;
@@ -176,6 +209,8 @@ export function overview(facts: LeadFact[], q: URLSearchParams, today: string, r
     touchTarget: rules.touchTarget,
     // Three independent dimensions per SDR, all on the same population as the drill-downs (eligible leads, filtered).
     dimsAll: dimCounts(rows.filter((f) => f.eligible), today, rules),
+    missingOwner: rows.filter((f) => cmoKeys(f, today, rules).includes("x_missing_owner")).length,
+    performanceColors: rules.performanceColors ?? DEFAULT_RULES.performanceColors, inactivityDays: rules.inactivityBusinessDays ?? 14,
     dims: Object.fromEntries(sdrTable(rows, nf).map((sd) => [sd.ownerId, dimCounts(rows.filter((f) => f.eligible && f.sdrOwnerId === sd.ownerId), today, rules)])),
     scorecardTargets: rules.scorecardTargets, slaStartDate: rules.slaStartDate ?? null,
     dealContext: dealContext(rows, today),

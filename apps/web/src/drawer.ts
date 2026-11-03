@@ -91,7 +91,7 @@ function dimSummary(rows: any[]) {
     line("First touch", tally("sla")),
     line("Follow-up", tally("followUp", (v) => v.replace(/ \(.*$/, ""))),
     line("Cadence", tally("cadence", (v) => v.startsWith("Cadence incomplete") ? "Incomplete" : "Complete")),
-    line("Action health", tally("healthLabel")));
+    line("Deadline", tally("deadlineLabel")));
 }
 
 /** Short, scannable follow-up state for a record. Colour: red overdue/stalled, amber action due, green on track, grey informational. */
@@ -198,6 +198,8 @@ function detailBody(r: any): HTMLElement {
   return h("div", null,
     h("div", { class: "kv tight" },
       kv("Status", [statusPill(r.status, r.statusLabel ?? r.status, r.risk), " ", r.statusReason ?? ""]),
+      kv("Deadline", r.dims ? [r.dims.overdue ? h("b", { class: "crit-t" }, r.dims.overdue) : r.dims.deadlineLabel, r.dims.due && !r.dims.overdue ? ` · due ${fmt.day(r.dims.due)} (${({ task: "HubSpot task", sla: "first-touch SLA", cadence: "follow-up cadence", reply: "prospect reply" } as Record<string, string>)[r.dims.dueSource] ?? "–"})` : ""] : null),
+      kv("Last SDR touch", r.dims && r.dims.inactiveDays !== null ? `${r.dims.inactiveDays} business days ${r.touchesSinceEligibility ? "since the last qualifying touch" : "since eligibility, never touched"}${r.dims.stale ? ` · no touch in ${r.dims.inactiveDays >= 14 ? "14+" : r.dims.inactiveDays} business days${r.dims.staleKind === "ae_or_pause" ? " (AE-led / paused)" : r.dims.staleKind === "review" ? " (needs review)" : " (SDR action)"}` : ""}` : null),
       kv("In play because", r.inPlayReason),
       kv("Next action", r.nextAction),
       kv("Touches", `${r.touchesSinceEligibility} since eligibility · ${r.touchesPostEvent} since event · ${r.touchesSinceAllocation ?? "–"} since allocation`),

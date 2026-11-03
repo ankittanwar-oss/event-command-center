@@ -474,3 +474,8 @@ details.dsec > summary .t::before { content: "▸ "; opacity: .6; }
 details.dsec[open] > summary .t::before { content: "▾ "; }
 details.moresec { margin-top: 18px; }
 details.moresec > summary { cursor: pointer; font-weight: 600; padding: 8px 0; opacity: .8; }
+.exgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; padding: 10px 14px; }
+.exb { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 10px 12px; border: 1px solid var(--line, #e4e4e7); border-radius: 8px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.exb:hover { background: rgba(0,0,0,.03); }
+.exv { font-size: 20px; font-weight: 700; } .exl { font-size: 13px; font-weight: 600; } .exh { font-size: 11px; opacity: .65; }
+.s-stale .wdot { background: #a8a29e; } .s-stale .wact { color: #57534e; }
