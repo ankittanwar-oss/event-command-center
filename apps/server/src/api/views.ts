@@ -151,7 +151,8 @@ export function cmoKeys(f: LeadFact, today: string, rules: Rules): string[] {
   if (ds) k.push(`dl_${ds}`);
   if (ds === "no_deadline") k.push("x_no_deadline");
   if (f.status === "unverifiable") k.push("x_unverified_activity");
-  if (f.status === "in_play" && /^Open opportunity/.test(f.inPlayReason ?? "") && !contactLevelInPlay(f)) k.push("x_uncertain_handoff");
+  // Open deal that has NOT reached the SQL milestone: commercial context only; SDR outreach continues.
+  if ((f.deals ?? []).some((d) => d.status === "open" && !d.sqlDate && d.via !== "duplicate_company")) k.push("x_uncertain_handoff");
   return k;
 }
 

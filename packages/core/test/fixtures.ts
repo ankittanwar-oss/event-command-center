@@ -5,7 +5,11 @@ export const DISHA = "88722653";      // APAC
 export const ANSHU = "2125691021";    // EMEA
 export const AE = "95421364";         // not on roster (an AE)
 
-export function rules(patch: unknown = {}): Rules { return mergeRules({ ...DEFAULT_RULES, minEventDate: null, slaStartDate: null }, patch); }
+// Test baseline: 3-business-day first-touch SLA for both temperatures (the fixtures' dates were written for it).
+export function rules(patch: unknown = {}): Rules {
+  const base = mergeRules({ ...DEFAULT_RULES, minEventDate: null, slaStartDate: null }, { cadence: { Hot: { firstTouchBusinessDays: 3 }, Warm: { firstTouchBusinessDays: 3 } } });
+  return mergeRules(base, patch);
+}
 
 export function company(p: Partial<Company> = {}): Company {
   return {
@@ -25,7 +29,7 @@ export function act(p: Partial<Activity> & { ts: string }): Activity {
   return { id: `emails:${++seq}`, kind: "EMAIL", objectType: "emails", timestamp: ts.length === 10 ? `${ts}T15:00:00Z` : ts, ownerId: BOBBI, direction: "EMAIL", channel: null, status: null, title: null, contactIds: ["c1"], companyIds: ["co1"], ...rest };
 }
 export function deal(p: Partial<Deal> = {}): Deal {
-  return { id: "d1", name: "Acme – New", stage: "s", stageLabel: "Discovery", isClosed: false, isWon: false, ownerId: AE, amount: null, createdAt: "2026-10-10T00:00:00Z", mqlDate: "2026-10-10", sqlDate: null, contactIds: ["c1"], companyIds: ["co1"], ...p };
+  return { id: "d1", name: "Acme – New", stage: "s", stageLabel: "Discovery", isClosed: false, isWon: false, ownerId: AE, amount: null, createdAt: "2026-10-10T00:00:00Z", mqlDate: "2026-10-10", sqlDate: "2026-10-12", contactIds: ["c1"], companyIds: ["co1"], ...p };
 }
 
 export function dataset(opts: { companies?: Company[]; contacts?: Contact[]; events?: EventRecord[]; links?: Array<[string, string, string?]>; acts?: Activity[]; tasks?: Task[]; deals?: Deal[] } = {}): Dataset {

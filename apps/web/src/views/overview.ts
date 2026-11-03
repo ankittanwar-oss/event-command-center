@@ -256,10 +256,10 @@ export async function overviewView(route: Route): Promise<HTMLElement> {
       ex(K(all, "x_no_deadline"), "No verifiable due date", "No touch yet and eligible before the SLA start, so no first-touch deadline applies", "cmo_x_no_deadline"),
       ex(d.missingOwner ?? 0, "Missing ownership", "Registrations not counted as eligible because no roster SDR owns the company", "cmo_x_missing_owner"),
       ex(K(all, "x_unverified_activity"), "Unverified activity", "Outreach logged on the company, not on this contact", "cmo_x_unverified_activity"),
-      ex(K(all, "x_uncertain_handoff"), "Uncertain commercial handoff", "Open opportunity on the account but not on this contact: SDR or AE?", "cmo_x_uncertain_handoff")),
+      ex(K(all, "x_uncertain_handoff"), "Open deal, not yet SQL", "Open deal without a Became Qualified to Buy Date: SDR outreach continues, deal shown as context", "cmo_x_uncertain_handoff")),
     h("div", { class: "exgrid" },
       ex(K(all, "dl_not_yet_due"), "Not yet due", "Verified deadline still ahead", "cmo_dl_not_yet_due"),
-      ex(K(all, "dl_commercial"), "Active commercial engagement", "Open opportunity, meeting or reply", "cmo_dl_commercial"),
+      ex(K(all, "dl_commercial"), "Active commercial engagement", "Qualified deal (SQL), meeting or reply", "cmo_dl_commercial"),
       ex(K(all, "dl_paused"), "Paused / not actionable", "Recently closed lost, disqualified, or cadence complete", "cmo_dl_paused"),
       ex(K(all, "dl_missing_data"), "Missing data", "Event date or activity date unknown", "cmo_dl_missing_data")));
 

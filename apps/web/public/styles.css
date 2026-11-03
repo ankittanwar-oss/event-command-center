@@ -524,3 +524,19 @@ details.moresec > summary { cursor: pointer; font-weight: 600; padding: 8px 0; o
 .evline { font-size: 13px; padding: 2px 0; }
 @media (max-width: 900px) { .crow2 { grid-template-columns: 8px minmax(0, 1fr) minmax(0, 1fr); } .cmeta2, .ctags { display: none; } }
 @media (prefers-color-scheme: dark) { .c-red .cact { color: #fda29b; } .c-amber .cact { color: #fec84b; } .c-green .cact { color: #75e0a7; } .c-grey .cact { color: #cbd2dc; } }
+/* ---- Drawer: never wider than the viewport; body scrolls; tables scroll inside themselves */
+.drawer { width: min(720px, 100vw); max-width: 100vw; box-sizing: border-box; }
+.drawer .dh { position: sticky; top: 0; z-index: 1; background: var(--panel); min-width: 0; }
+.drawer .dh > div:first-child { min-width: 0; overflow: hidden; } .drawer .dh .t, .drawer .dh .muted { overflow-wrap: anywhere; }
+.drawer .db { overflow-y: auto; overflow-x: hidden; min-width: 0; overscroll-behavior: contain; }
+.drawer .close { flex: none; }
+.cdrawer { padding: 14px 18px; min-width: 0; overflow-wrap: anywhere; }
+.cdrawer .kv { grid-template-columns: minmax(110px, 34%) minmax(0, 1fr); }
+.tbl-scroll { max-width: 100%; overflow-x: auto; } .tbl-scroll table { min-width: 640px; }
+.drawer .tbl-wrap { max-width: 100%; overflow-x: auto; }
+.dmore { margin: 8px 0; border-top: 1px solid var(--line, #eee); padding-top: 6px; } .dmore > summary { cursor: pointer; font-size: 13px; font-weight: 600; }
+.nlinks { margin-top: 6px; font-size: 13px; }
+.actline .ow { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ctime { font-weight: 500; opacity: .75; }
+.crow2 { grid-template-columns: 8px minmax(0, 1.6fr) minmax(0, 2fr) minmax(0, 1.3fr); }
+@media (max-width: 700px) { .drawer { width: 100vw; } .cdrawer .kv { grid-template-columns: 1fr; } .actline { grid-template-columns: 60px 70px minmax(0, 1fr); } .actline > :last-child { grid-column: 1 / -1; } }

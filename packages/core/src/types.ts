@@ -130,6 +130,7 @@ export interface DealRef {
   timing: "before_event" | "after_event" | "unknown";   // pre-existing (MQL, or creation if never MQL, before the event) / new since the event
   via: "contact" | "company" | "duplicate_company"; // this contact / this company only / a same-name company record with the same SDR
   ownerId?: string | null;            // HubSpot deal owner (optional: absent on older snapshots)
+  sqlDate?: string | null;            // verified "Became Qualified to Buy Date" (SQL milestone)
 }
 
 export interface Owner {
@@ -220,6 +221,8 @@ export interface LeadFact {
   lastReplyAt?: string | null;          // latest prospect reply since eligibility
   lastOutboundAt?: string | null;       // latest outbound email/call/meeting by anyone (SDR, AE, other)
   lastOutboundOwnerId?: string | null;
+  lastOutboundKind?: string | null;
+  currentSdrTouchesSinceAllocation?: number | null;
   lastMeetingAt?: string | null;
   currentSdrTouches?: number | null;    // touches by the CURRENT SDR since the event date (other reps not credited)
   otherSdrTouches?: number;             // qualifying touches by OTHER roster SDRs since the event (context, never credited)

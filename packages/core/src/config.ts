@@ -97,13 +97,13 @@ export const DEFAULT_RULES: Rules = {
     // Operating expectations discussed with the CMO (not a finalized policy): ~3 business days to first touch,
     // >=4 touches in ~30 days, >=8 touches in ~8 weeks, intervention at 6 touches. All configurable.
     Hot: {
-      firstTouchBusinessDays: 3,
+      firstTouchBusinessDays: 2,
       stallBusinessDays: 7,
       cadence: [{ day: 0, touches: 1 }, { day: 30, touches: 4 }, { day: 56, touches: 8 }],
       interventionTouches: 6,
     },
     Warm: {
-      firstTouchBusinessDays: 3,
+      firstTouchBusinessDays: 4,
       stallBusinessDays: 10,
       cadence: [{ day: 0, touches: 1 }, { day: 30, touches: 4 }, { day: 56, touches: 8 }],
       interventionTouches: 6,

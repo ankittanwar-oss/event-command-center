@@ -111,7 +111,7 @@ export function shortStatus(r: any): { label: string; cls: "crit" | "warnr" | "o
     case "first_touch": return r.insufficientFollowUp ? { label: "Follow-up due", cls: "warnr" } : { label: "Touched · next not due", cls: "neu" };
     case "active": return { label: "On track", cls: "ok" };
     case "in_play": {
-      const kind = /^Open opportunity/.test(r.inPlayReason ?? "") ? "Open opportunity" : /^Meeting/.test(r.inPlayReason ?? "") ? "Meeting" : /^Prospect replied/.test(r.inPlayReason ?? "") ? "Replied" : /Disqualified/.test(r.inPlayReason ?? "") ? "Disqualified" : "In play";
+      const kind = /^Qualified \(SQL/.test(r.inPlayReason ?? "") ? "Qualified (SQL)" : /^Meeting/.test(r.inPlayReason ?? "") ? "Meeting" : /^Prospect replied/.test(r.inPlayReason ?? "") ? "Replied" : /Disqualified/.test(r.inPlayReason ?? "") ? "Disqualified" : "In play";
       if (r.touchesSinceEligibility === 0) return { label: `${kind} · no SDR touch`, cls: "neu" };
       return r.risk === "healthy" ? { label: `In play · ${kind}`, cls: "ok" } : { label: "Review next action", cls: "neu" };
     }

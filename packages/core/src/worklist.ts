@@ -85,7 +85,7 @@ export function leadWork(f: LeadFact, today: string, rules: Rules): WorkItem {
   if (f.status === "in_play") {
     const r = f.inPlayReason ?? "In play";
     if (r === "Disqualified") return item("monitor", "Paused", "Disqualified in HubSpot");
-    if (r.startsWith("Open opportunity")) return item("monitor", "Monitor", `${r.replace("Open opportunity: ", "Open opp: ")} – AE-led; check with the AE before outreach`);
+    if (r.startsWith("Qualified (SQL")) return item("monitor", "Monitor", `${r} – handed to the AE`);
     return item("monitor", "Monitor", r);
   }
   if (f.status === "recently_lost") return item("monitor", "Paused", f.statusReason);
@@ -105,7 +105,7 @@ export function leadWork(f: LeadFact, today: string, rules: Rules): WorkItem {
   //    - follow-up OVERDUE once the gap since the last touch exceeds the stall threshold (existing "stalled" rule).
   //    Fewer than 6–7 touches alone never makes a lead overdue.
   const target = rules.touchTarget?.bandMax ?? 7;
-  if (f.touchesSinceEligibility >= target) return item("monitor", "Review next step", `Cadence complete (${f.touchesSinceEligibility} touches, no reply)`);
+  // 6–7 touches is the expected cadence, not a maximum: follow-up continues on the same timing rules after it.
   const last = toDate(f.lastTouchAt);
   if (!last) return item("monitor", "Needs review", "Follow-up timing unverified (last touch date unknown)");
   const stallDue = addBusinessDays(last, rule.stallBusinessDays + 1, rules);
@@ -165,7 +165,8 @@ export function leadDimensions(f: LeadFact, today: string, rules: Rules) {
 export function contactLevelInPlay(f: LeadFact): boolean {
   const r = f.inPlayReason ?? "";
   if (/^Meeting on|^Prospect replied/.test(r)) return true;
-  if (r.startsWith("Open opportunity")) return (f.deals ?? []).some((d) => d.status === "open" && d.via === "contact");
+  // A verified SQL (Became Qualified to Buy Date) on the account's open deal is a confirmed handoff for the account.
+  if (r.startsWith("Qualified (SQL")) return true;
   return false;
 }
 
@@ -355,96 +356,121 @@ export function actionStatus(f: LeadFact, today: string, rules: Rules, given?: W
 }
 
 // ---------------------------------------------------------------------------------------------------------------
-// SDR daily worklist v2: ONE row per HubSpot contact, in exactly one group.
-//   respond     prospect reply, or a HubSpot task (explicit commitment) due today / overdue
-//   reach_out   eligible, no SDR touch yet, no commercial activity on the account
-//   follow_up   contacted before; next touch is due (cadence below curve / past stall / 14+ bd quiet)
-//   coordinate  open deal on the company only, nothing verified for this contact: confirm with the AE
-//   progress    in progress / no action needed now (on track, task scheduled later, meeting/reply/deal with
-//               contact, cadence complete, paused, or outreach logged on the company only)
-// Colour: red = verified overdue commitment or first-touch SLA breach; amber = due today / due now;
-//         green = progressing or complete; grey = waiting, review, or AE coordination. Zero touches is never red.
-// Reporting views keep their event-lead records; this grouping is presentation only.
+// SDR daily worklist v3: ONE row per HubSpot contact, in exactly one group.
+//   respond         real prospect reply; SDR-owned HubSpot task due today or overdue
+//   first_outreach  eligible, no qualifying SDR touch yet (an open deal WITHOUT an SQL date does not change this)
+//   follow_up       worked before and another touch is due now (cadence, stall limit, or 14+ business days quiet)
+//   qualified       verified SQL: an open deal with a "Became Qualified to Buy Date"
+//   review          genuinely missing or contradictory data
+//   progress        up to date: next touch not due yet, task scheduled later, meeting/reply in progress, paused
+// Colour: red verified overdue · amber due today / timely outreach · green qualified or progressing · grey info/review.
+// Presentation only: event-lead reporting and KPI denominators are unchanged.
 // ---------------------------------------------------------------------------------------------------------------
 export const CONTACT_GROUPS = [
-  { key: "respond", label: "Respond", hint: "Prospect replies and HubSpot tasks due today or overdue" },
-  { key: "reach_out", label: "Reach out", hint: "Eligible contacts with no SDR outreach yet" },
-  { key: "follow_up", label: "Follow up", hint: "Contacted before; the next touch is due" },
-  { key: "coordinate", label: "Coordinate with AE", hint: "Open deal on the company, nothing verified for this contact" },
-  { key: "progress", label: "In progress / no action now", hint: "On track, scheduled, in conversation, complete or paused" },
+  { key: "respond", label: "Respond now", hint: "Prospect replies and HubSpot tasks due today or overdue" },
+  { key: "first_outreach", label: "First outreach", hint: "Eligible contacts with no qualifying SDR outreach yet" },
+  { key: "follow_up", label: "Follow up", hint: "Already contacted; another touch is due" },
+  { key: "qualified", label: "Qualified / handed off", hint: "Verified SQL: the deal has a Became Qualified to Buy Date" },
+  { key: "review", label: "Needs review", hint: "Missing or contradictory data" },
+  { key: "progress", label: "Up to date", hint: "Next touch not due yet, task scheduled, in conversation, or paused" },
 ] as const;
 export type ContactGroup = (typeof CONTACT_GROUPS)[number]["key"];
 
 export interface ContactAction { group: ContactGroup; action: string; reason: string; color: ActionColor; due: string | null; overdueBusinessDays: number | null; sort: number }
+
+/** Why this contact matters, from verified evidence only. Sponsored-event attendance is not SpotDraft engagement. */
+export function engagementReason(f: LeadFact): { text: string; strength: number } {
+  const reply = replyDate(f);
+  if (reply) return { text: `Replied ${reply}`, strength: 0 };
+  if (f.lastMeetingAt || /^Meeting on/.test(f.inPlayReason ?? "")) return { text: `Meeting ${toDate(f.lastMeetingAt ?? null) ?? (f.inPlayReason ?? "").slice(11)}`, strength: 0 };
+  const ev = f.eventName.split(/[|:]/)[0]!.trim().slice(0, 40);
+  if (f.attendance === "attended") return f.eventCategory === "sponsored"
+    ? { text: `Attended ${ev} (sponsored · SpotDraft engagement unverified)`, strength: 3 }
+    : { text: `Attended ${ev}`, strength: 1 };
+  if (f.attendance === "no_show") return { text: `Registered, did not attend ${ev}`, strength: 4 };
+  return { text: `Registered for ${ev}${f.eventCategory === "sponsored" ? " (sponsored)" : ""} · attendance not recorded`, strength: 4 };
+}
 
 export function contactAction(f: LeadFact, today: string, rules: Rules): ContactAction {
   const w = leadWork(f, today, rules);
   const n = w.overdueBusinessDays ?? 0;
   const bd = (x: number) => `${x} business day${x === 1 ? "" : "s"}`;
   const ia = inactivity(f, today, rules);
+  const temp = f.temperature ?? "Lead";
+  const sla = rules.cadence[f.temperature ?? "Warm"].firstTouchBusinessDays;
   const mk = (group: ContactGroup, action: string, reason: string, color: ActionColor, sort: number): ContactAction => ({ group, action, reason, color, due: w.due, overdueBusinessDays: w.overdueBusinessDays, sort });
-  const accountDealOnly = (f.deals ?? []).some((d) => d.status === "open") && !(f.deals ?? []).some((d) => d.status === "open" && d.via === "contact");
   switch (w.dueSource) {
-    case "reply": return n > 0 ? mk("respond", "Reply to prospect", `Replied ${replyDate(f)}; unanswered for ${bd(n)}`, "red", 0) : mk("respond", "Reply to prospect", `Replied ${replyDate(f)}`, "amber", 1);
+    case "reply": return n > 0 ? mk("respond", "Reply to prospect", `Replied ${replyDate(f)}; no response for ${bd(n)}`, "red", 0) : mk("respond", "Reply to prospect", `Replied ${replyDate(f)}`, "amber", 1);
     case "task":
       if (w.section === "overdue") return mk("respond", "Complete HubSpot task", `${w.why.replace(/^Task: /, "")} · overdue by ${bd(n)}`, "red", 0);
       if (w.section === "today") return mk("respond", "Complete HubSpot task", `${w.why.replace(/^Task: /, "")} · due today`, "amber", 1);
-      return mk("progress", "No action needed now", `HubSpot task scheduled for ${w.due}`, "green", 9);
+      return mk("progress", "Task scheduled", `${w.why.replace(/^Task: /, "")} · due ${w.due}`, "green", 9);
     case "sla":
-      if (w.section === "overdue") return mk("reach_out", "Send first outreach", `First-touch SLA passed ${bd(n)} ago`, "red", 2);
-      if (w.section === "today") return mk("reach_out", "Send first outreach", "First-touch SLA due today", "amber", 3);
-      return mk("reach_out", "Send first outreach", `First touch due by ${w.due}`, "grey", 5);
-    case "cadence":
-      if (w.section === "overdue") return mk("follow_up", "Continue follow-up", `No touch for ${bd(ia.businessDays ?? 0)} (follow-up was due ${w.due})`, "amber", 3);
-      if (w.section === "today") return mk("follow_up", "Continue follow-up", `Touch ${f.touchesSinceEligibility + 1} due${w.due && w.due < today ? ` since ${w.due}` : " today"}`, "amber", 4);
-      if (ia.stale) return mk("follow_up", "Continue follow-up", `No touch for ${bd(ia.businessDays ?? 0)}`, "grey", 6);
-      return mk("progress", "No action needed now", `On track · next touch by ${w.due}`, "green", 9);
+      if (w.section === "overdue") return mk("first_outreach", "Send first outreach", `${temp} SLA (${sla} business days) passed ${bd(n)} ago`, "red", 2);
+      if (w.section === "today") return mk("first_outreach", "Send first outreach", `${temp} SLA due today`, "amber", 3);
+      return mk("first_outreach", "Send first outreach", `${temp} SLA: due by ${w.due}`, "amber", 4);
+    case "cadence": {
+      const next = `touch ${f.touchesSinceEligibility + 1}`;
+      if (w.section === "overdue") return mk("follow_up", "Send follow-up", `${next} · no touch for ${bd(ia.businessDays ?? 0)} (was due ${w.due})`, "red", 3);
+      if (w.section === "today") return mk("follow_up", "Send follow-up", `${next} · due ${w.due && w.due < today ? `since ${w.due}` : "today"}`, "amber", 4);
+      if (ia.stale) return mk("follow_up", "Send follow-up", `${next} · no touch for ${bd(ia.businessDays ?? 0)}`, "amber", 5);
+      return mk("progress", "Next touch not due yet", `${next} due by ${w.due}`, "green", 9);
+    }
   }
-  // No date-based action. Decide by situation.
-  if (w.action === "Review next step") return mk("progress", "Decide next step", `Cadence complete (${f.touchesSinceEligibility} touches), no reply`, "green", 8);
-  if (w.action === "Paused") return mk("progress", "No action needed now", /Disqualified/.test(w.why) ? "Disqualified in HubSpot" : "Recently closed lost", "grey", 10);
   if (f.status === "in_play") {
-    if (contactLevelInPlay(f)) return mk("progress", "No action needed now", (f.inPlayReason ?? "").replace(/^Open opportunity: /, "Deal with contact: "), "green", 9);
-    if (accountDealOnly) return mk("coordinate", "Confirm next step with AE", `${(f.inPlayReason ?? "").replace(/^Open opportunity: /, "Open deal on company: ")}${f.touchesSinceEligibility ? "" : " · no SDR outreach yet"}`, "grey", 7);
-    return mk("progress", "No action needed now", f.inPlayReason ?? "In play", "grey", 10);
+    const r = f.inPlayReason ?? "";
+    if (r.startsWith("Qualified (SQL")) return mk("qualified", "AE handoff · qualified", r.replace(/^Qualified \(SQL ([^)]+)\): /, "SQL $1 · "), "green", 8);
+    if (r === "Disqualified") return mk("progress", "No action now", "Disqualified in HubSpot", "grey", 10);
+    return mk("progress", "In conversation", r, "green", 9);
   }
-  if (f.status === "unverifiable") return mk("progress", "Log outreach on the contact", "Outreach was logged on the company, not on this contact", "grey", 10);
-  if (f.touchesSinceEligibility === 0) return mk("reach_out", "Send first outreach", `No outreach yet${f.eligibilityDate ? ` · eligible since ${f.eligibilityDate}` : ""} (before the SLA start, no deadline)`, "grey", 6);
-  return mk("progress", "No action needed now", w.why, "grey", 10);
+  if (f.status === "recently_lost") return mk("progress", "No action now", f.statusReason, "grey", 10);
+  if (f.status === "unverifiable") return mk("review", "Check outreach logging", "Outreach is logged on the company, not on this contact", "grey", 7);
+  if (!f.eligibilityDate) return mk("review", "Check event data", "Event date missing", "grey", 7);
+  if (f.touchesSinceEligibility === 0) return mk("first_outreach", "Send first outreach", `No SLA deadline (eligible ${f.eligibilityDate}, before the SLA start)`, "grey", 6);
+  return mk("review", "Check timing", w.why, "grey", 7);
 }
 
 /** One row per contact across all their event-lead records. Touches are distinct activities, never summed per event. */
 export function contactWorklist(rows: LeadFact[], today: string, rules: Rules) {
   const by = new Map<string, LeadFact[]>();
   for (const f of rows) if (f.eligible) (by.get(f.contactId) ?? by.set(f.contactId, []).get(f.contactId)!).push(f);
+  const gOrder: Record<ContactGroup, number> = { respond: 0, first_outreach: 2, follow_up: 1, qualified: 3, review: 4, progress: 5 };
   const items = [...by.values()].map((leads) => {
-    const scored = leads.map((f) => ({ f, a: contactAction(f, today, rules) }));
-    const gOrder: Record<ContactGroup, number> = { respond: 0, reach_out: 1, follow_up: 2, coordinate: 3, progress: 4 };
-    // Most urgent record decides; a touched record beats an untouched one for the same contact (outreach already started).
-    scored.sort((x, y) => x.a.sort - y.a.sort || gOrder[x.a.group] - gOrder[y.a.group] || (x.a.due ?? "9").localeCompare(y.a.due ?? "9"));
+    const scored = leads.map((f) => ({ f, a: contactAction(f, today, rules), e: engagementReason(f) }));
+    scored.sort((x, y) => x.a.sort - y.a.sort || gOrder[x.a.group] - gOrder[y.a.group] || x.e.strength - y.e.strength || (x.a.due ?? "9").localeCompare(y.a.due ?? "9"));
+    // A contact already worked on any of their events is never "first outreach".
     let top = scored[0]!;
-    const anyTouched = scored.find((s) => s.f.touchesSinceEligibility > 0);
-    if (top.a.group === "reach_out" && anyTouched) top = anyTouched.a.group === "reach_out" ? top : anyTouched;
+    if (top.a.group === "first_outreach") top = scored.find((s) => s.a.group !== "first_outreach" && s.f.touchesSinceEligibility > 0) ?? top;
     const f = top.f;
+    const best = [...scored].sort((x, y) => x.e.strength - y.e.strength)[0]!.e;
     const ids = new Set(leads.flatMap((l) => l.touchIds));
     const yourTouches = Math.max(0, ...leads.map((l) => l.currentSdrTouches ?? 0));
+    const sinceAlloc = leads.some((l) => l.currentSdrTouchesSinceAllocation != null) ? Math.max(0, ...leads.map((l) => l.currentSdrTouchesSinceAllocation ?? 0)) : null;
     const other = leads.map((l) => l.lastOtherSdrTouch).filter((x): x is { at: string; ownerId: string | null } => !!x).sort((a, b) => b.at.localeCompare(a.at))[0] ?? null;
-    const lastOut = leads.map((l) => ({ at: l.lastOutboundAt !== undefined ? l.lastOutboundAt : l.lastTouchAt, by: l.lastOutboundAt !== undefined ? l.lastOutboundOwnerId ?? null : l.lastTouchOwnerId ?? null }))
+    const lastOut = leads.map((l) => ({ at: l.lastOutboundAt !== undefined ? l.lastOutboundAt : l.lastTouchAt, by: l.lastOutboundAt !== undefined ? l.lastOutboundOwnerId ?? null : l.lastTouchOwnerId ?? null, kind: l.lastOutboundKind ?? null }))
       .filter((x) => x.at).sort((a, b) => b.at!.localeCompare(a.at!))[0] ?? null;
-    const openDeal = leads.flatMap((l) => l.deals ?? []).find((d) => d.status === "open") ?? null;
+    const ia = inactivity(f, today, rules);
+    const deals = leads.flatMap((l) => l.deals ?? []).filter((d, i, a) => a.findIndex((x) => x.id === d.id) === i);
+    const sqlDeal = deals.filter((d) => d.status === "open" && d.sqlDate).sort((a, b) => (b.sqlDate ?? "").localeCompare(a.sqlDate ?? ""))[0] ?? null;
+    const openDeal = sqlDeal ?? deals.find((d) => d.status === "open") ?? null;
+    const anyMissingSql = deals.some((d) => d.status === "open" && !d.sqlDate);
     return {
       contactId: f.contactId, contactName: f.contactName, jobTitle: f.jobTitle, contactEmail: f.contactEmail,
       companyId: f.companyId, companyName: f.companyName, sdrOwnerId: f.sdrOwnerId, sdrName: f.sdrOwnerId ? rosterById.get(f.sdrOwnerId)?.name ?? null : null,
-      sdrSource: f.sdrSource ?? null, allocationDate: f.allocationDate,
-      temperature: f.temperature ?? (f.temperatureRaw || null),
+      sdrSource: f.sdrSource ?? null, allocationDate: f.allocationDate, eligibilityDate: f.eligibilityDate,
+      temperature: f.temperature ?? (f.temperatureRaw || null), engagement: best.text, engagementStrength: best.strength,
       ...top.a, eventId: f.eventId,
-      yourTouches, sdrTouchesAny: ids.size, otherSdrTouches: Math.max(0, ...leads.map((l) => l.otherSdrTouches ?? 0)), lastOtherSdrTouch: other,
-      lastOutboundAt: lastOut?.at ?? null, lastOutboundOwnerId: lastOut?.by ?? null,
-      deal: openDeal ? { name: openDeal.name, stage: openDeal.stageLabel, id: openDeal.id, via: openDeal.via, ownerId: openDeal.ownerId ?? null } : null,
+      yourTouches, yourTouchesSinceAllocation: sinceAlloc, sdrTouchesAny: ids.size,
+      otherSdrTouches: Math.max(0, ...leads.map((l) => l.otherSdrTouches ?? 0)), lastOtherSdrTouch: other,
+      lastOutboundAt: lastOut?.at ?? null, lastOutboundOwnerId: lastOut?.by ?? null, lastOutboundKind: lastOut?.kind ?? null,
+      daysSinceTouch: ia.businessDays, nextTask: f.nextTaskDue ? { due: f.nextTaskDue, subject: f.nextTaskSubject ?? null, ownerId: f.nextTaskOwnerId ?? null } : null,
+      sql: sqlDeal ? "yes" : anyMissingSql || !deals.length ? "no" : "no",
+      deal: openDeal ? { name: openDeal.name, stage: openDeal.stageLabel, id: openDeal.id, via: openDeal.via, ownerId: openDeal.ownerId ?? null, sqlDate: openDeal.sqlDate ?? null } : null,
+      deals,
       events: leads.map((l) => ({ id: l.eventId, name: l.eventName, date: l.eventDate, category: l.eventCategory, attendance: l.attendance })),
     };
   });
-  items.sort((a, b) => a.sort - b.sort || (a.due ?? "9").localeCompare(b.due ?? "9") || (a.temperature === "Hot" ? -1 : 0) - (b.temperature === "Hot" ? -1 : 0));
+  items.sort((a, b) => a.sort - b.sort || a.engagementStrength - b.engagementStrength || (a.temperature === "Hot" ? -1 : 0) - (b.temperature === "Hot" ? -1 : 0) || (a.due ?? "9").localeCompare(b.due ?? "9"));
   const counts = Object.fromEntries(CONTACT_GROUPS.map((g) => [g.key, items.filter((i) => i.group === g.key).length])) as Record<ContactGroup, number>;
   return { groups: CONTACT_GROUPS, counts, items };
 }

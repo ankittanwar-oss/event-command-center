@@ -200,10 +200,13 @@ export function computeLeadFact(
   // ---- legitimate pauses (outcomes that change the expected cadence)
   let inPlayReason: string | null = null;
   if (eligibilityDate) {
-    const openDeal = deals.find((d) => !d.isClosed && !rules.inactiveDealStages.some((x) => (d.stageLabel ?? "").toLowerCase().includes(x.toLowerCase())));
+    // SQL milestone = the deal's verified "Became Qualified to Buy Date" (HUBSPOT_DEAL_SQL_PROPERTY). An open deal
+    // without that date (e.g. Discovery in the pre-qualification pipeline) does NOT take the lead out of SDR outreach;
+    // it stays as commercial context only. Closed deals (won/lost) never put a lead in play here.
+    const openDeal = deals.find((d) => !d.isClosed && !!d.sqlDate && !rules.inactiveDealStages.some((x) => (d.stageLabel ?? "").toLowerCase().includes(x.toLowerCase())));
     const meeting = contactActs.find((a) => a.kind === "MEETING" && toDate(a.timestamp)! >= eligibilityDate);
     const reply = contactActs.find((a) => isRealReply(a) && toDate(a.timestamp)! >= eligibilityDate);
-    if (openDeal) inPlayReason = `Open opportunity: ${openDeal.name ?? openDeal.id}${openDeal.stageLabel ? ` (${openDeal.stageLabel})` : ""}`;
+    if (openDeal) inPlayReason = `Qualified (SQL ${openDeal.sqlDate}): ${openDeal.name ?? openDeal.id}${openDeal.stageLabel ? ` (${openDeal.stageLabel})` : ""}`;
     else if (meeting) inPlayReason = `Meeting on ${toDate(meeting.timestamp)}`;
     else if (reply) inPlayReason = `Prospect replied on ${toDate(reply.timestamp)}`;
     else if (contact.leadStatus && rules.disqualifiedLeadStatuses.includes(contact.leadStatus.toUpperCase())) inPlayReason = "Disqualified";
@@ -309,7 +312,7 @@ export function computeLeadFact(
       lostComment: status === "lost" ? d.lostComment ?? null : null,
       timing: !ev.date || (!d.mqlDate && !d.createdAt) ? "unknown" : historical(d) ? "before_event" : "after_event",
       via: contactDealIds.has(d.id) ? "contact" : ownDealIds.has(d.id) ? "company" : "duplicate_company",
-      ownerId: d.ownerId ?? null,
+      ownerId: d.ownerId ?? null, sqlDate: d.sqlDate ?? null,
     };
   });
   dealRefs.sort(dealOrder);
@@ -330,7 +333,8 @@ export function computeLeadFact(
     maxGapDays: gaps.length ? Math.max(...gaps) : null,
     daysSinceLastTouch: lastTouchAt ? daysBetween(toDate(lastTouchAt)!, today) : null,
     businessDaysToFirstTouch: bizToFirst, businessDaysSinceEligibility: bizSinceElig,
-    lastReplyAt, lastOutboundAt: lastOutbound?.timestamp ?? null, lastOutboundOwnerId: lastOutbound?.ownerId ?? null, lastMeetingAt,
+    lastReplyAt, lastOutboundAt: lastOutbound?.timestamp ?? null, lastOutboundOwnerId: lastOutbound?.ownerId ?? null, lastOutboundKind: lastOutbound?.kind ?? null, lastMeetingAt,
+    currentSdrTouchesSinceAllocation: sdr && allocationDate ? touches.filter((t) => t.ownerId === sdr && day(t) >= allocationDate).length : null,
     currentSdrTouches, otherSdrTouches, lastOtherSdrTouch, lastTouchOwnerId, currentSdrLastTouchAt,
     nextTaskSubject: nextTask?.subject ?? null, nextTaskOwnerId: nextTask?.ownerId ?? null, slaApplies: !noSla,
     firstTouchSlaMet: noSla ? null : slaMet, firstTouchOverdue: noSla ? false : overdue, expectedTouches: expected,

@@ -39,11 +39,10 @@ describe("daily worklist", () => {
     const n = one(dataset({ events: [event({ date: "2026-10-28" })], acts: [act({ ts: "2026-10-28" })] }));
     assert.equal(n.section, "upcoming");
   });
-  test("one touch + open opportunity only on the account is not 'healthy'; a deal on the contact is", () => {
-    const acctDeal = computeLeadFacts(dataset({ acts: [act({ ts: "2026-10-02" })], deals: [deal({ contactIds: [] })] }), R, T)[0]!;
-    assert.equal(acctDeal.status, "in_play");
-    assert.equal(riskOf(acctDeal, R)?.level, "neutral");
-    assert.equal(leadDimensions(acctDeal, T, R).health, "unverified");
+  test("an open deal WITHOUT a Became Qualified to Buy Date never takes the lead out of SDR follow-up", () => {
+    const acctDeal = computeLeadFacts(dataset({ acts: [act({ ts: "2026-10-02" })], deals: [deal({ contactIds: [], sqlDate: null, stageLabel: "Discovery" })] }), R, T)[0]!;
+    assert.notEqual(acctDeal.status, "in_play");
+    assert.notEqual(leadDimensions(acctDeal, T, R).health, "on_track");
     const contactDeal = computeLeadFacts(dataset({ acts: [act({ ts: "2026-10-02" })], deals: [deal()] }), R, T)[0]!;
     assert.equal(riskOf(contactDeal, R)?.level, "healthy");
   });
@@ -113,8 +112,8 @@ test("a HubSpot task due today is the primary action even with an account-level 
   const a = actionStatus(computeLeadFacts(ds, R, T)[0]!, T, R);
   assert.equal(a.label, "HubSpot task due today"); assert.equal(a.color, "amber");
   assert.deepEqual(a.secondary, ["Open deal on company"]);
-  const noTask = actionStatus(computeLeadFacts(dataset({ acts: [act({ ts: "2026-10-26" })], deals: [deal({ contactIds: [] })] }), R, T)[0]!, T, R);
-  assert.equal(noTask.label, "Review next action"); assert.equal(noTask.color, "grey");
+  const noTask = actionStatus(computeLeadFacts(dataset({ acts: [act({ ts: "2026-10-26" })], deals: [deal({ contactIds: [], sqlDate: null })] }), R, T)[0]!, T, R);
+  assert.doesNotMatch(noTask.label, /In conversation|Review/); assert.deepEqual(noTask.secondary, ["Open deal on company"]);
 });
 
 test("current SDR's own touches before a later allocation date count; another SDR's do not", () => {
@@ -141,19 +140,34 @@ describe("contact worklist", () => {
     const { contactWorklist } = await import("../src/index.js");
     const ds = dataset({ companies: [company({ allocationDate: "2026-10-27" })], acts: [act({ ts: "2026-10-13" }), act({ ts: "2026-10-12", ownerId: DISHA })] });
     const i = contactWorklist(computeLeadFacts(ds, R, T), T, R).items[0]!;
-    assert.equal(i.yourTouches, 1); assert.equal(i.otherSdrTouches, 1); assert.notEqual(i.action, "Send first outreach");
+    assert.equal(i.yourTouches, 1); assert.equal(i.otherSdrTouches, 1); assert.notEqual(i.action, "Send first outreach"); assert.equal(i.yourTouchesSinceAllocation, 0);
   });
-  test("account-only deal -> Coordinate with AE (grey); a task due today still wins", async () => {
+  test("open deal WITHOUT SQL date: untouched -> First outreach, touched -> Follow up; SQL date -> Qualified", async () => {
     const { contactAction } = await import("../src/index.js");
-    const a = contactAction(computeLeadFacts(dataset({ deals: [deal({ contactIds: [] })] }), R, T)[0]!, T, R);
-    assert.equal(a.group, "coordinate"); assert.equal(a.color, "grey"); assert.equal(a.action, "Confirm next step with AE");
-    const t = contactAction(computeLeadFacts(dataset({ deals: [deal({ contactIds: [] })], tasks: [{ id: "t", dueDate: "2026-10-30T10:00:00Z", status: "NOT_STARTED", taskType: "CALL", ownerId: BOBBI, subject: "Call", contactIds: ["c1"] }] }), R, T)[0]!, T, R);
+    const pre = { contactIds: [], sqlDate: null, stageLabel: "Discovery" };
+    const a = contactAction(computeLeadFacts(dataset({ deals: [deal(pre)] }), R, T)[0]!, T, R);
+    assert.equal(a.group, "first_outreach"); assert.equal(a.action, "Send first outreach");
+    const b = contactAction(computeLeadFacts(dataset({ deals: [deal(pre)], acts: [act({ ts: "2026-10-05" })] }), R, T)[0]!, T, R);
+    assert.equal(b.group, "follow_up");
+    const q = contactAction(computeLeadFacts(dataset({ deals: [deal({ contactIds: [], sqlDate: "2026-10-12" })] }), R, T)[0]!, T, R);
+    assert.equal(q.group, "qualified"); assert.equal(q.color, "green");
+    const t = contactAction(computeLeadFacts(dataset({ deals: [deal(pre)], tasks: [{ id: "t", dueDate: "2026-10-30T10:00:00Z", status: "NOT_STARTED", taskType: "CALL", ownerId: BOBBI, subject: "Call", contactIds: ["c1"] }] }), R, T)[0]!, T, R);
     assert.equal(t.group, "respond"); assert.equal(t.color, "amber");
+  });
+  test("a closed qualified (historical) deal does not suppress a new event lead", async () => {
+    const { contactAction } = await import("../src/index.js");
+    const a = contactAction(computeLeadFacts(dataset({ deals: [deal({ isClosed: true, isWon: false, sqlDate: "2025-03-01", closeDate: "2025-06-01" } as any)] }), R, T)[0]!, T, R);
+    assert.equal(a.group, "first_outreach");
+  });
+  test("sponsored attendance is not verified engagement", async () => {
+    const { engagementReason } = await import("../src/index.js");
+    const f = computeLeadFacts(dataset({ events: [event({ category: "sponsored", name: "ACC EVENT 2026" })], links: [["e1", "c1", "2026-10-01"]] }), R, T)[0]!;
+    assert.match(engagementReason(f).text, /unverified/);
   });
   test("zero touches with no SLA deadline is grey, not red", async () => {
     const { contactAction } = await import("../src/index.js");
     const a = contactAction(computeLeadFacts(dataset(), rules({ slaStartDate: "2026-10-30" }), T)[0]!, T, rules({ slaStartDate: "2026-10-30" }));
-    assert.equal(a.group, "reach_out"); assert.equal(a.color, "grey");
+    assert.equal(a.group, "first_outreach"); assert.equal(a.color, "grey");
   });
 });
 
