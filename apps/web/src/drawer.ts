@@ -37,14 +37,27 @@ export const BUCKET_LABEL: Record<string, string> = {
 };
 
 export async function openLeads(filters: FilterState, bucket: string, extra: Record<string, string> = {}, title?: string) {
-  const body = openShell(title ?? BUCKET_LABEL[bucket] ?? "Leads", "Records behind the number, with the current filters applied");
+  const body = openShell(title ?? BUCKET_LABEL[bucket] ?? "Leads", "Records behind the number, with the dashboard filters applied");
   try {
     const r = await api("leads", { ...filterParams(filters), bucket, ...extra, limit: "3000" });
+    const active = [
+      filters.region && `Region: ${filters.region}`, filters.sdr && `SDR: ${sdrNames.get(filters.sdr) ?? filters.sdr}`,
+      filters.category && `Category: ${filters.category}`, filters.temperature && `Temperature: ${filters.temperature}`,
+      filters.eventId && `Event: ${r.rows[0]?.eventName ?? filters.eventId}`, filters.search && `Search: “${filters.search}”`,
+    ].filter(Boolean) as string[];
+    // Surface records whose status may look surprising for this KPI, without changing the KPI itself.
+    const inPlayNoTouch = r.rows.filter((x: any) => x.status === "in_play" && x.touchesSinceEligibility === 0).length;
+    const note = (bucket === "untouched" || bucket === "never_worked") && inPlayNoTouch
+      ? h("div", { class: "dnote" }, `${inPlayNoTouch} of these have no SDR touch but are already commercially active (open opportunity, meeting, reply or DQ). They are counted here because no SDR touch is logged.`)
+      : null;
     body.replaceChildren(
-      h("div", { class: "kv" }, h("div", { class: "k" }, "Records"), h("div", null, fmt.n(r.total), r.total > r.rows.length ? ` (showing ${r.rows.length})` : ""),
-        h("div", { class: "k" }, "Period"), h("div", null, r.filters.quarterLabel),
-        r.filters.sdrCleared ? [h("div", { class: "k" }, "Note"), h("div", null, "The selected SDR is not in this region, so the SDR filter was cleared.")] : null,
-        riskSummary(r.rows)),
+      h("div", { class: "dhead" },
+        h("span", { class: "dcount" }, fmt.n(r.total), h("small", null, r.total === 1 ? " record" : " records"), r.total > r.rows.length ? h("small", null, ` (showing ${r.rows.length})`) : null),
+        h("span", { class: "chipx" }, r.filters.quarterLabel),
+        active.map((a) => h("span", { class: "chipx" }, a)),
+        r.filters.sdrCleared ? h("span", { class: "chipx warnr-t" }, "SDR filter cleared: not in this region") : null,
+        h("span", { class: "dmix" }, riskSummary(r.rows))),
+      note ?? "",
       leadTable(r.rows));
   } catch (e) { body.replaceChildren(h("div", { class: "banner warn" }, String((e as Error).message))); }
 }
@@ -57,26 +70,118 @@ function riskSummary(rows: any[]) {
   for (const r of rows) if (r.risk) { c.eligible!++; c[r.risk]!++; }
   const levels = (["critical", "at_risk", "healthy", "neutral"] as Risk[]).filter((l) => c[l]);
   if (levels.length < 2) return null;
-  return [h("div", { class: "k" }, "Health"), h("div", { class: "kvbar" }, riskBar(c as any), levels.map((l) => h("span", { class: `li ${RISK[l].cls}` }, h("i", null, RISK[l].icon), `${RISK[l].label} ${c[l]}`)))];
+  return h("div", { class: "kvbar" }, riskBar(c as any), levels.map((l) => h("span", { class: `li ${RISK[l].cls}` }, h("i", null, RISK[l].icon), `${RISK[l].label} ${c[l]}`)));
 }
 
+/** Short, scannable follow-up state for a record. Colour: red overdue/stalled, amber action due, green on track, grey informational. */
+export function shortStatus(r: any): { label: string; cls: "crit" | "warnr" | "ok" | "neu" } {
+  if (!r.eligible) return { label: "Not eligible", cls: "neu" };
+  switch (r.status) {
+    case "never_worked":
+      if (r.firstTouchOverdue) return { label: "Overdue · never worked", cls: "crit" };
+      if (r.risk === "at_risk") return { label: "Due today", cls: "warnr" };
+      return { label: "Not yet due", cls: "neu" };
+    case "stalled": return { label: "Stalled", cls: "crit" };
+    case "first_touch": return r.insufficientFollowUp ? { label: "Follow-up due", cls: "warnr" } : { label: "Touched · next not due", cls: "neu" };
+    case "active": return { label: "On track", cls: "ok" };
+    case "in_play": {
+      const kind = /^Open opportunity/.test(r.inPlayReason ?? "") ? "Open opportunity" : /^Meeting/.test(r.inPlayReason ?? "") ? "Meeting" : /^Prospect replied/.test(r.inPlayReason ?? "") ? "Replied" : /Disqualified/.test(r.inPlayReason ?? "") ? "Disqualified" : "In play";
+      return r.touchesSinceEligibility > 0 ? { label: `In play · ${kind}`, cls: "ok" } : { label: `${kind} · no SDR touch`, cls: "neu" };
+    }
+    case "unverifiable": return { label: "Unverified · company-level activity", cls: "neu" };
+    case "recently_lost": return { label: "Recently closed lost", cls: "neu" };
+    default: return { label: r.statusLabel ?? r.status, cls: "neu" };
+  }
+}
+
+const URGENCY: Record<string, number> = { crit: 0, warnr: 1, neu: 2, ok: 3 };
+/** Short next action: first clause only; the full text is in the expanded details. */
+const shortAction = (t: string | null | undefined) => (t ?? "").split(/ – |: |\. /)[0]!.trim();
+
+/** Compact record list used by every KPI drill-down (replaces the wide table). No horizontal scrolling. */
 export function leadTable(rows: any[]) {
-  const cols: Col<any>[] = [
-    { key: "risk", label: "Health", sort: (r) => (r.risk ? RISK_RANK[r.risk] ?? 9 : 9), render: (r) => riskPill(r.risk, r.status === "recently_lost" && r.eligible ? "Recently closed lost" : undefined, r.riskReason ?? r.ineligibleReason ?? undefined) },
-    { key: "contactName", label: "Contact", render: (r) => [h("span", { class: "link", onclick: () => openLead(r.eventId, r.contactId) }, r.contactName), hsLink("contact", r.contactId)] },
-    { key: "companyName", label: "Company", render: (r) => [r.companyName ?? "–", hsLink("company", r.companyId)] },
-    { key: "eventName", label: "Event", render: (r) => h("span", { title: r.eventName }, (r.eventName ?? "").slice(0, 38)) },
-    { key: "eventDate", label: "Date", render: (r) => fmt.day(r.eventDate) },
-    { key: "temperature", label: "Temp", render: (r) => tempPill(r.temperature) },
-    { key: "sdrOwnerId", label: "SDR", render: (r) => r.sdrName ?? sdrNames.get(r.sdrOwnerId) ?? (r.sdrOwnerRaw ? h("span", { class: "faint" }, `Not on roster (${r.sdrOwnerRaw})`) : "–") },
-    { key: "status", label: "Status", render: (r) => r.eligible ? statusPill(r.status, r.statusLabel ?? r.status, r.risk) : h("span", { class: "faint" }, r.ineligibleReason) },
-    { key: "touchesSinceEligibility", label: "Touches", num: true },
-    { key: "lastTouchAt", label: "Last touch", render: (r) => fmt.day(r.lastTouchAt) },
-    { key: "businessDaysToFirstTouch", label: "Days to 1st", num: true, title: "Business days from eligibility to first touch", render: (r) => r.businessDaysToFirstTouch ?? "–" },
-    { key: "attendance", label: "Attendance", render: (r) => r.attendance.replace("_", " ") },
-    { key: "nextAction", label: "Next action", wrap: true },
-  ];
-  return table(cols, rows, { initialSort: "risk", desc: false, rowClass: (r) => (r.risk === "critical" ? "row-crit" : "") });
+  const wrap = h("div", { class: "reclist" });
+  const search = h("input", { class: "text", type: "search", placeholder: "Search contact, company, event, SDR" }) as HTMLInputElement;
+  const sortSel = h("select", { class: "text" },
+    [["urgency", "Sort: urgency"], ["touches", "Sort: fewest touches"], ["event", "Sort: event date (newest)"], ["sdr", "Sort: SDR"], ["company", "Sort: company"]].map(([v, l]) => h("option", { value: v }, l))) as HTMLSelectElement;
+  const sdrs = [...new Set(rows.map((r) => r.sdrName ?? sdrNames.get(r.sdrOwnerId) ?? null).filter(Boolean))].sort() as string[];
+  const events = [...new Map(rows.map((r) => [r.eventId, r.eventName])).entries()];
+  const sdrSel = h("select", { class: "text" }, h("option", { value: "" }, "All SDRs"), sdrs.map((n) => h("option", { value: n }, n))) as HTMLSelectElement;
+  const evSel = h("select", { class: "text" }, h("option", { value: "" }, "All events"), events.map(([id, n]) => h("option", { value: id }, (n ?? "").slice(0, 50)))) as HTMLSelectElement;
+  const statuses = [...new Set(rows.map((r) => shortStatus(r).label))];
+  const stSel = h("select", { class: "text" }, h("option", { value: "" }, "All statuses"), statuses.map((s) => h("option", { value: s }, s))) as HTMLSelectElement;
+  const list = h("div", { class: "recs" });
+  const shown = h("span", { class: "muted" });
+
+  const sdrOf = (r: any) => r.sdrName ?? sdrNames.get(r.sdrOwnerId) ?? null;
+  const render = () => {
+    const q = search.value.trim().toLowerCase();
+    let data = rows.filter((r) =>
+      (!q || `${r.contactName} ${r.companyName ?? ""} ${r.eventName ?? ""} ${sdrOf(r) ?? ""} ${r.contactEmail ?? ""}`.toLowerCase().includes(q)) &&
+      (!sdrSel.value || sdrOf(r) === sdrSel.value) && (!evSel.value || r.eventId === evSel.value) && (!stSel.value || shortStatus(r).label === stSel.value));
+    const by = sortSel.value;
+    data = [...data].sort((a, b) =>
+      by === "touches" ? a.touchesSinceEligibility - b.touchesSinceEligibility
+      : by === "event" ? (b.eventDate ?? "").localeCompare(a.eventDate ?? "")
+      : by === "sdr" ? (sdrOf(a) ?? "~").localeCompare(sdrOf(b) ?? "~")
+      : by === "company" ? (a.companyName ?? "~").localeCompare(b.companyName ?? "~")
+      : URGENCY[shortStatus(a).cls]! - URGENCY[shortStatus(b).cls]! || (b.priority ?? 0) - (a.priority ?? 0));
+    shown.textContent = data.length === rows.length ? "" : `${data.length} of ${rows.length} shown`;
+    list.replaceChildren(...(data.length ? data.slice(0, 1500).map(record) : [h("div", { class: "empty" }, "No records match")]));
+  };
+  for (const el of [search]) el.addEventListener("input", render);
+  for (const el of [sortSel, sdrSel, evSel, stSel]) el.addEventListener("change", render);
+
+  function record(r: any): HTMLElement {
+    const st = shortStatus(r);
+    const sdr = sdrOf(r) ?? (r.sdrOwnerRaw ? `Not on roster (${r.sdrOwnerRaw})` : "No SDR");
+    const details = h("div", { class: "recd" });
+    let loaded = false;
+    const toggle = h("button", { class: "recx", "aria-expanded": "false", onclick: () => {
+      const open = el.classList.toggle("open");
+      toggle.setAttribute("aria-expanded", String(open));
+      toggle.textContent = open ? "Hide details" : "Details";
+      if (open && !loaded) { loaded = true; details.replaceChildren(detailBody(r)); }
+    } }, "Details");
+    const el = h("div", { class: `rec ${st.cls}` },
+      h("div", { class: "rl1" },
+        h("span", { class: "rname" }, h("span", { class: "link", onclick: () => openLead(r.eventId, r.contactId), title: "Open lead audit" }, r.contactName), hsLink("contact", r.contactId)),
+        h("span", { class: "rco" }, r.companyName ?? "No company", hsLink("company", r.companyId)),
+        h("span", { class: "rsdr muted" }, sdr),
+        h("span", { class: `rst ${st.cls}`, title: r.statusReason ?? "" }, st.label)),
+      h("div", { class: "rl2 muted" },
+        h("span", { class: "rev", title: r.eventName }, r.eventName ?? "–"), h("span", null, fmt.day(r.eventDate)),
+        r.temperature ? tempPill(r.temperature) : null,
+        h("span", null, r.attendance === "attended" ? "Attended" : r.attendance === "no_show" ? "Did not attend" : "Attendance unknown"),
+        h("span", { class: `rtouch ${r.touchesSinceEligibility ? "" : "zero"}` }, `${r.touchesSinceEligibility} SDR touch${r.touchesSinceEligibility === 1 ? "" : "es"}`),
+        r.lastTouchAt ? h("span", null, `last ${fmt.day(r.lastTouchAt)}`) : null),
+      h("div", { class: "rl3" }, h("span", { class: "ract", title: r.nextAction ?? "" }, r.eligible ? shortAction(r.nextAction) : `Excluded: ${r.ineligibleReason ?? ""}`), toggle),
+      details);
+    return el;
+  }
+  wrap.append(h("div", { class: "rectools" }, search, stSel, sdrSel, evSel, sortSel, shown), list);
+  render();
+  return wrap;
+}
+
+/** Expanded record: the full CRM context that was previously in the wide table, plus deals. */
+function detailBody(r: any): HTMLElement {
+  const kv = (k: string, v: any) => (v === null || v === undefined || v === "" ? null : [h("div", { class: "k" }, k), h("div", null, v)]);
+  return h("div", null,
+    h("div", { class: "kv tight" },
+      kv("Status", [statusPill(r.status, r.statusLabel ?? r.status, r.risk), " ", r.statusReason ?? ""]),
+      kv("In play because", r.inPlayReason),
+      kv("Next action", r.nextAction),
+      kv("Touches", `${r.touchesSinceEligibility} since eligibility · ${r.touchesPostEvent} since event · ${r.touchesSinceAllocation ?? "–"} since allocation`),
+      kv("First / last touch", `${fmt.day(r.firstTouchAt)} / ${fmt.day(r.lastTouchAt)}`),
+      kv("Days to first touch", r.businessDaysToFirstTouch !== null ? `${r.businessDaysToFirstTouch} business days${r.firstTouchSlaMet === false ? " (SLA missed)" : r.firstTouchSlaMet ? " (SLA met)" : ""}` : r.firstTouchOverdue ? "Not touched, SLA missed" : "Not touched yet"),
+      kv("Consistency", `${r.distinctTouchDays} day(s) · ${r.distinctTouchWeeks} week(s) · longest gap ${r.maxGapDays ?? "–"} d`),
+      kv("Next task", r.nextTaskDue ? fmt.day(r.nextTaskDue) : "None scheduled"),
+      kv("Eligibility", r.eligible ? `Eligible since ${fmt.day(r.eligibilityDate)} (allocated ${fmt.day(r.allocationDate)})` : `Not eligible: ${r.ineligibleReason}`),
+      kv("ICP / title", [r.icpTier ?? "–", r.jobTitle ? ` · ${r.jobTitle}` : ""]),
+      kv("Email", r.contactEmail)),
+    r.deals?.length ? h("div", { style: "margin-top:6px" }, dealTable(r.deals)) : null,
+    h("button", { class: "btn", style: "margin-top:8px", onclick: () => openLead(r.eventId, r.contactId) }, "Full activity audit →"));
 }
 
 export const sdrNames = new Map<string, string>();
