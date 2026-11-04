@@ -748,3 +748,10 @@ details.moresec > summary { cursor: pointer; font-weight: 600; padding: 8px 0; o
 .hwtable.simple th:first-child,.hwtable.simple td:first-child{width:46%;white-space:normal;overflow-wrap:anywhere}
 .hwtable.simple td,.hwtable.simple th{white-space:normal;overflow-wrap:anywhere}
 .rectools{flex-wrap:wrap}.rectools select{max-width:100%}
+
+.ocard .redact{margin-right:6px}
+.ore{font-size:12px;padding:2px 8px;border-radius:999px;background:#eef2ff;color:#3730a3}.ore.due{background:#fef3c7;color:#92400e}
+.rewrap{display:inline-flex;gap:6px;margin-left:auto}.resel,.redate{font-size:12.5px;padding:3px 6px}
+.mbar{display:flex;align-items:center;gap:8px;margin:4px 0 10px}
+.msub{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin:12px 0 6px}
+.msub.due{color:#92400e}.msub.none{color:#374151}.msub.later{color:#6b7280}

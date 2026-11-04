@@ -112,7 +112,7 @@ type Bucket = "pickup" | "fresh" | "momentum" | "radar" | "handled";
 const BUCKETS2: Array<{ key: Bucket; label: string; desc: string }> = [
   { key: "pickup", label: "Conversations to pick up", desc: "A prospect replied in your thread, or a HubSpot task or commitment is due." },
   { key: "fresh", label: "Fresh opportunities", desc: "Not contacted yet, with a verified signal: attended a SpotDraft event, replied, or a Hot/Surging account." },
-  { key: "momentum", label: "Keep the momentum", desc: "Accounts you've already worked. Time since last contact is shown as context, not a deadline." },
+  { key: "momentum", label: "Contacted · re-engage", desc: "Already contacted since the event (by you or a colleague). You choose when to re-engage; nothing is scheduled for you." },
   { key: "radar", label: "On your radar", desc: "Weaker or unverified signals: registered only, conference lists, intent without engagement, or data to check." },
   { key: "handled", label: "Already handled", desc: "Qualified / handed off to the AE, or paused for a verified reason." },
 ];
@@ -120,7 +120,7 @@ const BUCKETS2: Array<{ key: Bucket; label: string; desc: string }> = [
 function bucketOf(a: any, c: any): Bucket {
   if (a.bucket === "respond") return "pickup";
   if (a.bucket === "qualified" || a.bucket === "paused") return "handled";
-  if (a.worked) return "momentum";
+  if (a.worked || a.workedByOther) return "momentum";
   if (a.bucket === "review" || a.bucket === "low") return "radar";
   const strongest = Math.min(...a.contacts.map((x: any) => x.engagementStrength ?? 4));
   return strongest <= 1 || a.intent?.level === "hot" || (strongest === 2 && a.intent?.level === "warm") || c?.color === "red" ? "fresh" : "radar";
@@ -212,11 +212,13 @@ export async function dailyView(route: Route, meta: any): Promise<HTMLElement> {
     const hl = highlights(a, c);
     const open = () => accountPanel(a, c);
     return h("article", { class: `ocard n-${nd.tone}`, tabindex: "0", onclick: open, onkeydown: (e: KeyboardEvent) => { if (e.key === "Enter") open(); } },
-      h("div", { class: "oc1" }, h("span", { class: "ocname" }, a.companyName ?? "(no company)"), h("span", { class: `oint i-${it.cls}` }, it.cls === "unknown" ? `Account intent: ${it.text.toLowerCase()}` : `${it.text} account`),
+      h("div", { class: "oc1" }, hideBox(a), h("span", { class: "ocname" }, a.companyName ?? "(no company)"),
+        a.reengageOn ? h("span", { class: `ore ${a.reengageOn <= todayIso() ? "due" : ""}` }, a.reengageOn <= todayIso() ? `Re-engage due (${fmt.day(a.reengageOn)})` : `Re-engage ${fmt.day(a.reengageOn)}`) : null, h("span", { class: `oint i-${it.cls}` }, it.cls === "unknown" ? `Account intent: ${it.text.toLowerCase()}` : `${it.text} account`),
         ...hl.map((t) => h("span", { class: "ohl" }, t)), !f.sdr && a.sdrName ? h("span", { class: "ocown" }, a.sdrName) : null),
       h("div", { class: "oc2" }, h("b", null, c.contactName), c.jobTitle ? ` · ${c.jobTitle}` : "",
         h("span", { class: "osrc" }, ` — ${src.text}`, src.more > 0 ? h("span", { class: "more" }, ` +${src.more} more`) : null)),
       h("div", { class: "oc3" }, h("span", { class: `onudge t-${nd.tone}` }, nd.text),
+        b === "momentum" ? reengagePicker(a) : null,
         h("button", { class: "oexp", onclick: (e: Event) => { e.stopPropagation(); open(); } }, "Explore account →")));
   };
 
@@ -230,7 +232,24 @@ export async function dailyView(route: Route, meta: any): Promise<HTMLElement> {
     const page = (n: number) => { body.insertBefore(h("div", { class: "ocards" }, list.slice(shown, shown + n).map(card)), more); shown = Math.min(list.length, shown + n); st.shown[bk.key] = shown; persist(); more.style.display = shown < list.length ? "" : "none"; more.textContent = `Show ${Math.min(MORE, list.length - shown)} more (${list.length - shown} left)`; };
     more.addEventListener("click", () => page(MORE));
     body.append(more);
-    const fill = () => { if (!shown) { if (list.length) page(Math.max(FIRST_PAGE, Math.min(st.shown[bk.key] ?? 0, 60))); else body.prepend(h("div", { class: "wempty" }, "Nothing here right now.")); } };
+    if (bk.key === "momentum") {
+      const ms = x.get("msort") ?? "longest";
+      const lastOf = (r: any) => r.a.lastSdrTouch ?? r.a.workedByOther?.at ?? "";
+      const today = todayIso();
+      const due = list.filter((r) => r.a.reengageOn && r.a.reengageOn <= today).sort((p, q) => p.a.reengageOn.localeCompare(q.a.reengageOn));
+      const none = list.filter((r) => !r.a.reengageOn).sort((p, q) => ms === "recent" ? lastOf(q).localeCompare(lastOf(p)) : lastOf(p).localeCompare(lastOf(q)));
+      const later = list.filter((r) => r.a.reengageOn && r.a.reengageOn > today).sort((p, q) => p.a.reengageOn.localeCompare(q.a.reengageOn));
+      list.splice(0, list.length, ...due, ...none, ...later);
+      const msel = h("select", { class: "msort", onclick: (e: Event) => e.stopPropagation(), onchange: (e: Event) => go({ msort: (e.target as HTMLSelectElement).value }) },
+        [["longest", "Longest since contact first"], ["recent", "Most recently contacted first"]].map(([v, l]) => { const o = h("option", { value: v }, l) as HTMLOptionElement; if (v === ms) o.selected = true; return o; }));
+      const sec = (t: string, l: any[], cls: string) => l.length ? [h("div", { class: `msub ${cls}` }, `${t} (${l.length})`), h("div", { class: "ocards" }, l.slice(0, 60).map(card)),
+        l.length > 60 ? h("div", { class: "faint" }, `${l.length - 60} more: use search or filters`) : null] : [];
+      const mfill = () => { if (body.dataset.f) return; body.dataset.f = "1"; more.style.display = "none";
+        body.prepend(...((list.length ? [h("div", { class: "mbar" }, h("span", { class: "faint" }, "Accounts with no re-engage date: "), msel),
+          ...sec("Re-engage due", due, "due"), ...sec("No re-engage date chosen yet", none, "none"), ...sec("Re-engage scheduled", later, "later")] : [h("div", { class: "wempty" }, "Nothing here right now.")]) as any[]).filter((n) => !!n)); };
+      (body as any)._fill = mfill;
+    }
+    const fill = () => { if ((body as any)._fill) return (body as any)._fill(); if (!shown) { if (list.length) page(Math.max(FIRST_PAGE, Math.min(st.shown[bk.key] ?? 0, 60))); else body.prepend(h("div", { class: "wempty" }, "Nothing here right now.")); } };
     const el = h("section", { class: `obucket b-${bk.key} ${isOpen ? "open" : ""} ${list.length ? "" : "empty"}` });
     const chev = h("span", { class: "chev" }, isOpen ? "▾" : "▸");
     const toggle = () => { const now = !el.classList.contains("open"); el.classList.toggle("open", now); chev.textContent = now ? "▾" : "▸"; st.open = now ? [...new Set([...st.open!, bk.key])] : st.open!.filter((k) => k !== bk.key); persist(); if (now) fill(); };
@@ -348,8 +367,16 @@ function accountPanel(a: any, initial: any) {
     blockEl(`Contacts at this account (${a.contacts.length})`,
       h("div", { class: "pother" }, a.contacts.map((c: any) => {
         const e = strongestEvent(c);
+        const cb = h("input", { type: "checkbox", class: "redact", title: "Hide this lead (wrong or irrelevant)" }) as HTMLInputElement;
+        cb.addEventListener("click", (e) => e.stopPropagation());
+        cb.addEventListener("change", async () => {
+          if (!cb.checked) return;
+          const reason = prompt(`Hide ${c.contactName}? Optional reason:`, "");
+          if (reason === null) { cb.checked = false; return; }
+          try { await redact(c, a, reason); (cb.closest(".pc") as HTMLElement | null)?.remove(); refresh(); } catch (e) { cb.checked = false; alert((e as Error).message); }
+        });
         return h("button", { class: "pc", onclick: () => { render(c); box.parentElement?.scrollTo?.({ top: 0 }); } },
-          h("div", null, h("b", null, c.contactName), c.jobTitle ? h("span", { class: "faint" }, ` · ${c.jobTitle}`) : null),
+          h("div", null, cb, " ", h("b", null, c.contactName), c.jobTitle ? h("span", { class: "faint" }, ` · ${c.jobTitle}`) : null),
           h("div", { class: "faint" }, [c.engagementLabel, e ? `${partText(e)} · ${short(e.name)}` : null, c.lastOutboundAt ? `last contacted ${fmt.day(c.lastOutboundAt)}` : "not contacted", c.yourTouches ? "worked" : "unworked", c.disposition ? "paused" : null].filter(Boolean).join(" · ")));
       }))),
     ...(a.contacts.some((c: any) => c.deals?.length) ? [h("details", { class: "pblk" }, h("summary", null, h("h3", { style: "display:inline" }, "Deals")), h("div", { class: "tbl-scroll" }, dealTable(a.contacts.flatMap((c: any) => c.deals ?? []).filter((dl: any, i: number, arr: any[]) => arr.findIndex((y) => y.id === dl.id) === i))))] : []),
@@ -389,4 +416,52 @@ export function dispositionForm(scope: "contact" | "company", id: string, name: 
       ...(current?.source === "dashboard" ? [h("button", { class: "btn", onclick: () => call("DELETE") }, "Clear")] : [])),
     msg,
     h("div", { class: "faint", style: "margin-top:10px;font-size:12px" }, "Confirmed dispositions stop routine outreach suggestions and keep the outreach credit already earned. They do not change HubSpot."));
+}
+
+const todayIso = () => new Date().toISOString().slice(0, 10);
+const addDays = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
+const myName = () => { try { return localStorage.getItem("ecc-name") ?? ""; } catch { return ""; } };
+const refresh = () => setTimeout(() => window.dispatchEvent(new HashChangeEvent("hashchange")), 200);
+
+/** SDR picks when to re-engage this account (no default: the SDR decides). */
+function reengagePicker(a: any) {
+  const key = a.companyId ?? a.key;
+  const date = h("input", { type: "date", class: "redate", value: a.reengageOn ?? "" }) as HTMLInputElement;
+  const save = async (d: string | null) => {
+    try {
+      await api("reengage", undefined, { method: d ? "POST" : "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key, date: d, by: myName() }) });
+      refresh();
+    } catch (e) { alert((e as Error).message); }
+  };
+  const sel = h("select", { class: "resel" }, [["", a.reengageOn ? "Change re-engage…" : "Re-engage in…"], ["3", "3 days"], ["7", "7 days"], ["14", "14 days"], ["30", "30 days"], ["date", "Pick a date…"], ...(a.reengageOn ? [["clear", "Clear date"]] : [])]
+    .map(([v, l]) => h("option", { value: v }, l))) as HTMLSelectElement;
+  sel.addEventListener("change", () => {
+    const v = sel.value;
+    if (v === "clear") return save(null);
+    if (v === "date") { date.style.display = ""; date.focus(); try { (date as any).showPicker?.(); } catch { /* ignore */ } return; }
+    if (v) save(addDays(Number(v)));
+  });
+  date.style.display = "none";
+  date.addEventListener("change", () => { if (date.value) save(date.value); });
+  return h("span", { class: "rewrap", onclick: (e: Event) => e.stopPropagation(), onkeydown: (e: Event) => e.stopPropagation() }, sel, date);
+}
+
+/** Tick box: hide this account's leads (wrong / irrelevant). They move to Redacted leads and leave every list. */
+function hideBox(a: any) {
+  const cb = h("input", { type: "checkbox", class: "redact", title: "Hide this account's leads (wrong or irrelevant). They move to Redacted leads." }) as HTMLInputElement;
+  cb.addEventListener("click", (e) => e.stopPropagation());
+  cb.addEventListener("change", async () => {
+    if (!cb.checked) return;
+    const reason = prompt(`Hide ${a.contacts.length} lead${a.contacts.length === 1 ? "" : "s"} at ${a.companyName ?? "this account"}? Optional reason:`, "");
+    if (reason === null) { cb.checked = false; return; }
+    try {
+      for (const c of a.contacts) await redact(c, a, reason);
+      const card = cb.closest(".ocard") as HTMLElement | null; if (card) { card.classList.add("gone"); setTimeout(() => card.remove(), 250); }
+    } catch (e) { cb.checked = false; alert((e as Error).message); }
+  });
+  return cb;
+}
+async function redact(c: any, a: any, reason: string) {
+  await api("redactions", undefined, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ contactId: c.contactId, contactName: c.contactName, companyName: a.companyName, events: (c.events ?? []).map((e: any) => e.name).join(", "), reason, redactedBy: myName() }) });
 }

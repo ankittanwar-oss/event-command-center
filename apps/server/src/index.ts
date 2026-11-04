@@ -18,7 +18,7 @@ async function main() {
   (async () => {
     if ((await getSetting("facts_build")) === BUILD) return;
     // Full refresh on every new deploy: re-reads HubSpot AND the roundtable Google Sheet, then recomputes all facts.
-    const r = await runSync("startup");
+    const r = await runSync("startup", { forceFull: true });
     if (r.status !== "success") { const n = await recomputeFacts(); log.info("deploy sync failed; recomputed stored facts", { leads: n }); }
     invalidateSnapshot(); await setSetting("facts_build", BUILD);
     log.info("deploy refresh done", { build: BUILD, status: r.status });

@@ -572,8 +572,11 @@ type HwRec = { f: LeadFact; cls: "hot" | "warm"; evidence: string; worked: boole
  *  any other contact at the same company since the event (the account is being worked, so it is not a gap). */
 function hwRecords(pop: LeadFact[]): HwRec[] {
   const byCo = new Map<string, Array<{ at: string; ownerId: string | null; contactId: string; contactName: string | null }>>();
-  for (const f of pop) if (f.companyId && f.otherRepTouch) {
-    const l = byCo.get(f.companyId) ?? []; l.push({ ...f.otherRepTouch, contactId: f.contactId, contactName: f.contactName ?? null }); byCo.set(f.companyId, l);
+  for (const f of pop) if (f.companyId) {
+    const l = byCo.get(f.companyId) ?? [];
+    if (f.otherRepTouch) l.push({ ...f.otherRepTouch, contactId: f.contactId, contactName: f.contactName ?? null });
+    if (f.currentSdrLastTouchAt) l.push({ at: f.currentSdrLastTouchAt, ownerId: f.sdrOwnerId ?? null, contactId: f.contactId, contactName: f.contactName ?? null });
+    byCo.set(f.companyId, l);
   }
   const out: HwRec[] = [];
   for (const f of pop) {
@@ -644,7 +647,7 @@ export function cmoHotWarm(facts: LeadFact[], q: URLSearchParams, today: string,
     definitions: {
       hot: "Hot lead = a documented conversation with this person: a real reply (not auto-replies or calendar notices), a meeting, or a note our team logged on the contact around the event (e.g. a booth conversation).",
       warm: "Warm lead = attended the event: check-in / attended date in HubSpot, the roundtable sheet, or the organiser's attendee list uploaded by our team (conference attendee). Registration only, unknown attendance and no-shows are not Warm.",
-      worked: "Worked = outreach since the event by the contact's current SDR, OR by another SDR/AE to this person or anyone else at the same company (the account is being worked). Those are labelled \"Worked by <name>\" in drill-downs.",
+      worked: "Worked = anyone at SpotDraft (the SDR, another SDR, an AE or the events team) reached this person or anyone else at the same company after the event. To target = the account has not been touched at all since the event.",
       company: "Hot/Warm LEADS are people. Hot/Warm/Surging ACCOUNTS are the company Account Intent Level in HubSpot. They are reported separately and one never sets the other: a Warm account can have no Warm leads, and a Cold account can have a Hot lead.",
     },
   };

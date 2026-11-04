@@ -33,3 +33,17 @@ export async function sheetNotes(): Promise<Map<string, Array<{ note: string; ta
   }
   return out;
 }
+
+/** Re-engage dates chosen by SDRs. Nothing is scheduled automatically: the SDR decides. */
+export async function loadReengage(): Promise<Map<string, string>> {
+  try { const r = await getPool().query("SELECT account_key, to_char(reengage_on, 'YYYY-MM-DD') AS d FROM reengage"); return new Map(r.rows.map((x: any) => [x.account_key, x.d])); }
+  catch { return new Map(); }
+}
+export async function saveReengage(b: any): Promise<string | null> {
+  if (!b?.key || !/^(contact:)?\d+$/.test(String(b.key))) return "key must be a company id or contact:<id>";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(b.date ?? ""))) return "date must be YYYY-MM-DD";
+  await getPool().query(`INSERT INTO reengage (account_key, reengage_on, set_by) VALUES ($1,$2,$3)
+    ON CONFLICT (account_key) DO UPDATE SET reengage_on = EXCLUDED.reengage_on, set_by = EXCLUDED.set_by, set_at = now()`, [String(b.key), b.date, b.by ? String(b.by).slice(0, 80) : null]);
+  return null;
+}
+export async function clearReengage(key: string) { await getPool().query("DELETE FROM reengage WHERE account_key = $1", [key]); }

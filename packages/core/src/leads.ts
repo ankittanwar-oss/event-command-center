@@ -41,7 +41,7 @@ export function mapTemperature(raw: string | null, rules: Rules): Temperature | 
 /** A prospect reply: an incoming email that is not an auto-reply, out-of-office or bounce. */
 const AUTO_REPLY = /^\s*(automatic reply|auto[- ]?reply|autoreply|auto:|out of (the )?office|ooo\b|undeliverable|delivery status notification|mail delivery (failed|subsystem)|returned mail|accepted:|declined:|tentative:|tentatively accepted|updated invitation|invitation:|new event:|canceled event|cancelled event)/i;
 export function isRealReply(a: Activity): boolean {
-  return a.kind === "INCOMING_EMAIL" && !AUTO_REPLY.test(a.title ?? "");
+  return a.kind === "INCOMING_EMAIL" && a.status !== "ACK" && !AUTO_REPLY.test(a.title ?? "");
 }
 
 export function expectedTouches(ageDays: number, rule: CadenceRule): number {

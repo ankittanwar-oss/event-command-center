@@ -26,7 +26,7 @@ export const ACTIVITY_TYPES = ["emails", "calls", "meetings", "communications", 
 export type ActivityType = (typeof ACTIVITY_TYPES)[number];
 
 export const ACTIVITY_PROPERTIES: Record<ActivityType, string[]> = {
-  emails: ["hs_timestamp", "hubspot_owner_id", "hs_email_direction", "hs_email_subject", "hs_email_status"],
+  emails: ["hs_timestamp", "hubspot_owner_id", "hs_email_direction", "hs_email_subject", "hs_email_status", "hs_email_text"],
   calls: ["hs_timestamp", "hubspot_owner_id", "hs_call_direction", "hs_call_status", "hs_call_title", "hs_call_disposition"],
   meetings: ["hs_timestamp", "hs_meeting_start_time", "hubspot_owner_id", "hs_meeting_outcome", "hs_meeting_title"],
   communications: ["hs_timestamp", "hubspot_owner_id", "hs_communication_channel_type", "hs_communication_logged_from", "hs_body_preview"],
@@ -154,6 +154,7 @@ export function mapActivity(type: ActivityType, r: any): ActivityRow | null {
       direction = s(p.hs_email_direction)?.toUpperCase() ?? null;
       kind = direction === "INCOMING_EMAIL" ? "INCOMING_EMAIL" : direction === "EMAIL" ? "EMAIL" : "OTHER";
       status = s(p.hs_email_status); title = s(p.hs_email_subject);
+      if (kind === "INCOMING_EMAIL" && isClosingReply(s(p.hs_email_text))) status = "ACK";
       break;
     }
     case "calls": {
@@ -268,4 +269,14 @@ export function attendedForEvent(eventDate: string | null, attended: string | nu
   if (!eventDate || !attended) return null;
   const diff = Math.round((Date.parse(attended) - Date.parse(eventDate)) / 86_400_000);
   return diff >= -rules.attendanceWindow.daysBefore && diff <= rules.attendanceWindow.daysAfter ? attended : null;
+}
+
+/** A short thank-you / closing reply with no question (e.g. "So sweet, thank you!") closes a thread: nothing is waiting
+ *  on us, so it must not trigger "Conversations to pick up". Only the new text above the quoted thread is checked. */
+export function isClosingReply(text: string | null): boolean {
+  if (!text) return false;
+  const fresh = text.split(/\bOn [^\n]{0,120}?wrote:|-{2,}\s*Original Message|\nFrom:\s|&gt;/i)[0]!.replace(/\s+/g, " ").trim();
+  if (!fresh || fresh.length > 120 || fresh.includes("?")) return false;
+  return /\b(thank(s| you)?|thx|appreciate(d)?|so sweet|so kind|lovely|perfect|awesome|great|got it|received|cheers|sounds good|will do|noted|no worries)\b/i.test(fresh)
+    && !/\b(call|meet(ing)?|demo|chat|time|schedule|interested|pricing|proposal|connect)\b/i.test(fresh);
 }
