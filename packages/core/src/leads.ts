@@ -39,7 +39,7 @@ export function mapTemperature(raw: string | null, rules: Rules): Temperature | 
 
 /** Expected cumulative touches at a given lead age, linear between the configured checkpoints (rounded down). */
 /** A prospect reply: an incoming email that is not an auto-reply, out-of-office or bounce. */
-const AUTO_REPLY = /^\s*(automatic reply|auto[- ]?reply|autoreply|auto:|out of (the )?office|ooo\b|undeliverable|delivery status notification|mail delivery (failed|subsystem)|returned mail)/i;
+const AUTO_REPLY = /^\s*(automatic reply|auto[- ]?reply|autoreply|auto:|out of (the )?office|ooo\b|undeliverable|delivery status notification|mail delivery (failed|subsystem)|returned mail|accepted:|declined:|tentative:|tentatively accepted|updated invitation|invitation:|new event:|canceled event|cancelled event)/i;
 export function isRealReply(a: Activity): boolean {
   return a.kind === "INCOMING_EMAIL" && !AUTO_REPLY.test(a.title ?? "");
 }
@@ -259,7 +259,9 @@ export function computeLeadFact(
 
   // ---- daily-worklist facts (context only: they do not change status, SLA or any reported metric)
   const maxTs = (xs: Activity[]) => xs.map((a) => a.timestamp).sort().pop() ?? null;
-  const lastReplyAt = eligibilityDate ? maxTs(contactActs.filter((a) => isRealReply(a) && toDate(a.timestamp)! >= eligibilityDate)) : null;
+  // Replies the SDR must answer: in a thread owned by an SDR (or unowned). Replies inside an AE's thread (e.g. a demo
+  // process run by the AE) are the AE's conversation, not an SDR "Reply now" item.
+  const lastReplyAt = eligibilityDate ? maxTs(contactActs.filter((a) => isRealReply(a) && toDate(a.timestamp)! >= eligibilityDate && (!a.ownerId || isRosterSdr(a.ownerId)))) : null;
   // Any outbound response by anyone (SDR, AE or other), so a reply already answered by an AE is not shown as waiting.
   const outbound = contactActs.filter((a) => (a.kind === "EMAIL" && (a.direction || "EMAIL").toUpperCase() === "EMAIL") ||
     (a.kind === "CALL" && (a.direction || "").toUpperCase() !== "INBOUND") || a.kind === "MEETING");

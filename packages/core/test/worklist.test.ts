@@ -360,3 +360,18 @@ describe("current ownership, verified participation and contact priority", () =>
     assert.equal(accountWorklist(items, NOV, rules()).length, 1);
   });
 });
+
+test("Instructure pattern: calendar 'Accepted:' notices and replies in an AE's thread never create an SDR 'Reply now'", async () => {
+  const { contactAction } = await import("../src/index.js");
+  const NOV = "2026-11-04";
+  const ds = dataset({ acts: [
+    act({ ts: "2026-10-20", ownerId: AE }),
+    act({ ts: "2026-10-30", kind: "INCOMING_EMAIL", direction: "INCOMING_EMAIL", ownerId: AE, title: "Re: SpotDraft CLM Demo" }),
+    act({ ts: "2026-10-31", kind: "INCOMING_EMAIL", direction: "INCOMING_EMAIL", ownerId: BOBBI, title: "Accepted: Instructure | SpotDraft - Demo @ Thu" }),
+  ] });
+  const f = computeLeadFacts(ds, R, NOV)[0]!;
+  assert.equal(f.lastReplyAt, null);
+  assert.notEqual(contactAction(f, NOV, R).group, "respond");
+  const sdrThread = computeLeadFacts(dataset({ acts: [act({ ts: "2026-10-28" }), act({ ts: "2026-10-30", kind: "INCOMING_EMAIL", direction: "INCOMING_EMAIL", title: "Re: SpotDraft" })] }), R, NOV)[0]!;
+  assert.equal(contactAction(sdrThread, NOV, R).group, "respond");
+});

@@ -39,7 +39,9 @@ export function addBusinessDays(day: string, n: number, rules: Rules): string {
 
 /** Reply date: the fact field, or (older snapshots) the in-play reason text. */
 export function replyDate(f: LeadFact): string | null {
-  return toDate(f.lastReplyAt ?? null) ?? /Prospect replied on (\d{4}-\d{2}-\d{2})/.exec(f.inPlayReason ?? "")?.[1] ?? null;
+  // lastReplyAt (SDR-thread replies only) is authoritative once synced; the status-text fallback is for old snapshots.
+  if (f.lastReplyAt !== undefined) return toDate(f.lastReplyAt);
+  return /Prospect replied on (\d{4}-\d{2}-\d{2})/.exec(f.inPlayReason ?? "")?.[1] ?? null;
 }
 
 /** Verified engagement with SpotDraft (not just attendance): a reply, a meeting, or a conversation before the event. */
