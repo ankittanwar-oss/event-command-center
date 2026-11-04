@@ -9,9 +9,9 @@ import { fmt, h, hsLink } from "../ui.js";
 const PART_LABEL: Record<string, string> = { "": "All eligible contacts", attended: "Verified attendees", registered: "Registered only", unknown: "Attendance unknown", sponsored_list: "Sponsored-event list only" };
 const PSTAT: Record<string, string> = { attended: "Attended (check-in or organiser list)", registered: "Registered only", unknown: "Attendance unknown", sponsored_list: "On sponsored-event list (not verified)", no_show: "Confirmed no-show" };
 const METRIC_LABEL: Record<string, string> = {
-  hot_total: "Hot contacts", hot_worked: "Hot contacts worked", hot_unworked: "Unworked Hot contacts", hot_cov: "Hot contacts (worked and unworked)",
-  warm_total: "Warm contacts", warm_worked: "Warm contacts worked", warm_unworked: "Unworked Warm contacts", warm_cov: "Warm contacts (worked and unworked)",
-  unworked: "Unworked Hot/Warm contacts", total: "Hot/Warm leads",
+  hot_total: "Hot contacts", hot_worked: "Hot contacts worked", hot_unworked: "Hot leads to target", hot_cov: "Hot contacts (worked and unworked)",
+  warm_total: "Warm contacts", warm_worked: "Warm contacts worked", warm_unworked: "Warm leads to target", warm_cov: "Warm contacts (worked and unworked)",
+  unworked: "Leads to target", total: "Hot/Warm leads",
 };
 
 export async function hotWarmSection(route: Route): Promise<HTMLElement> {
@@ -37,7 +37,7 @@ export async function hotWarmSection(route: Route): Promise<HTMLElement> {
     h("td", { class: "hwname" }, name), leads(r, scope, id, label), num(r.worked, scope, id, "worked", label), num(r.unworked, scope, id, "unworked", label), cov(r, scope, id, label));
   const head = (first: string) => h("thead", null, h("tr", null, h("th", null, first),
     h("th", { class: "n", title: "People with a documented conversation (Hot) or who attended (Warm). Not the company's intent." }, "Hot/Warm leads"),
-    h("th", { class: "n" }, "Worked"), h("th", { class: "n" }, "Unworked"), h("th", { class: "n" }, "Coverage")));
+    h("th", { class: "n" }, "Worked"), h("th", { class: "n" }, "To target"), h("th", { class: "n" }, "Coverage")));
 
   // ---- event table (ALL EVENTS pinned; default sort: most unworked Hot, then Warm)
   const esort = route.extra.get("esort") ?? "gap";
@@ -56,8 +56,8 @@ export async function hotWarmSection(route: Route): Promise<HTMLElement> {
   const A = d.all;
   const block = (n: number, label: string, tone: string, metric: string) => h("div", { class: `kblock ${tone}`, onclick: n ? drill("all", "", metric, "All events") : undefined }, h("div", { class: "kbn" }, fmt.n(n)), h("div", { class: "kbl" }, label));
   const snapshot = h("section", { class: "kgrid" },
-    block(A.hotTotal, "Total Hot", "tot hot", "hot_total"), block(A.hotWorked, "Hot worked", "ok", "hot_worked"), block(A.hotUnworked, "Hot unworked", "bad", "hot_unworked"),
-    block(A.warmTotal, "Total Warm", "tot warm", "warm_total"), block(A.warmWorked, "Warm worked", "ok", "warm_worked"), block(A.warmUnworked, "Warm unworked", "bad", "warm_unworked"));
+    block(A.hotTotal, "Total Hot", "tot hot", "hot_total"), block(A.hotWorked, "Hot worked", "ok", "hot_worked"), block(A.hotUnworked, "Hot to target", "bad", "hot_unworked"),
+    block(A.warmTotal, "Total Warm", "tot warm", "warm_total"), block(A.warmWorked, "Warm worked", "ok", "warm_worked"), block(A.warmUnworked, "Warm to target", "bad", "warm_unworked"));
 
   // ---- 2. Event summary: one clean row per event; click a row for the lead list.
   const pct = (v: number | null, n: number) => (n ? h("span", { class: `pc ${cls(v)}` }, `${Math.round(v ?? 0)}%`) : h("span", { class: "faint" }, "–"));
@@ -65,7 +65,7 @@ export async function hotWarmSection(route: Route): Promise<HTMLElement> {
     h("div", { class: "hwh" }, h("h2", null, "By event"),
       h("div", { class: "hwctl" }, sel("esort", esort, [["gap", "Most unworked"], ["lowest", "Lowest coverage"], ["hot", "Most Hot"], ["warm", "Most Warm"], ["date", "Newest event"]]))),
     h("div", { class: "tbl-wrap" }, h("table", { class: "hwtable simple" },
-      h("thead", null, h("tr", null, h("th", null, "Event"), h("th", { class: "n" }, "Hot"), h("th", { class: "n" }, "Hot worked"), h("th", { class: "n" }, "Warm"), h("th", { class: "n" }, "Warm worked"), h("th", { class: "n" }, "Unworked"))),
+      h("thead", null, h("tr", null, h("th", null, "Event"), h("th", { class: "n" }, "Hot"), h("th", { class: "n" }, "Hot worked"), h("th", { class: "n" }, "Warm"), h("th", { class: "n" }, "Warm worked"), h("th", { class: "n" }, "To target"))),
       ...[["Our events (check-ins)", evs.filter((e) => e.category !== "sponsored")], ["Conferences (organiser attendee lists)", evs.filter((e) => e.category === "sponsored")]]
         .filter(([, l]) => (l as any[]).length).map(([title, l]) => h("tbody", null,
           h("tr", { class: "grprow" }, h("td", { colspan: "6" }, title as string)),
@@ -103,7 +103,7 @@ async function openDrill(f: any, part: string, olist: string, scope: string, id:
   const opt = (pairs: Array<[string, string]>) => pairs.map(([v, l]) => h("option", { value: v }, l));
   const evs = new Map<string, string>(); const sdrsSet = new Set<string>();
   for (const r of rowsAll) { sdrsSet.add(r.sdrName); for (const e of r.events) evs.set(e.id, `${e.name} · ${fmt.day(e.date)}`); }
-  const wSel = h("select", null, opt([["", "Worked and unworked"], ["n", "Unworked"], ["y", "Worked"]])) as HTMLSelectElement;
+  const wSel = h("select", null, opt([["", "Worked and unworked"], ["n", "Good leads to target"], ["y", "Worked"]])) as HTMLSelectElement;
   const cSel = h("select", null, opt([["", "Hot and Warm"], ["hot", "Hot"], ["warm", "Warm"]])) as HTMLSelectElement;
   const eSel = h("select", null, opt([["", "Any event"], ...[...evs.entries()]])) as HTMLSelectElement;
   const sSel = h("select", null, opt([["", "Any SDR"], ...[...sdrsSet].sort().map((x) => [x, x] as [string, string])])) as HTMLSelectElement;
@@ -126,14 +126,16 @@ async function openDrill(f: any, part: string, olist: string, scope: string, id:
     const gl = [...groups.values()].sort((x, y) => y.items.filter((i) => !i.r.worked).length - x.items.filter((i) => !i.r.worked).length);
     list.replaceChildren(...gl.map((g, i) => {
       const un = g.items.filter((x) => !x.r.worked).length;
-      const det = h("details", { class: "evgrp" }, h("summary", null, h("b", null, g.name), h("span", { class: "faint" }, ` · ${g.items.length} leads · `), h("span", { class: un ? "unw" : "faint" }, `${un} not worked`)),
-        g.items.sort((x, y) => Number(x.r.worked) - Number(y.r.worked)).map(({ r, e }) => h("div", { class: `lead ${r.worked ? "w" : "u"}` },
+      const det = h("details", { class: "evgrp" }, h("summary", null, h("b", null, g.name), h("span", { class: "faint" }, ` · ${g.items.length} leads · `), h("span", { class: un ? "unw" : "faint" }, `${un} to target`)),
+        ...[["Good leads to target", g.items.filter((x) => !x.r.worked)], ["Already worked", g.items.filter((x) => x.r.worked)]].filter(([, l]) => (l as any[]).length).flatMap(([t, l]) => [
+          h("div", { class: `subhd ${t === "Already worked" ? "done" : "go"}` }, `${t} (${(l as any[]).length})`),
+          ...(l as Array<{ r: any; e: any }>).map(({ r, e }) => h("div", { class: `lead ${r.worked ? "w" : "t"}` },
           h("div", { class: "l1" }, redactBox(r), h("b", null, r.contactName), h("span", { class: `hwcls ${r.cls}` }, r.cls === "hot" ? "Hot" : "Warm"),
-            h("span", { class: `hwst ${r.worked ? "w" : "u"}` }, r.workedByOther ? `Worked by ${r.workedByOther.by}` : r.worked ? "Worked" : "Not worked"), h("span", { class: "sp" }), hsLink("contact", r.contactId)),
+            r.worked ? h("span", { class: "hwst w" }, r.workedByOther ? `Worked by ${r.workedByOther.by}` : "Worked") : null, h("span", { class: "sp" }), hsLink("contact", r.contactId)),
           h("div", { class: "l2" }, `${r.companyName ?? "No company"} · Account intent: ${r.companyIntent ?? "–"} · Status: ${nice(r.contactStatus)}`),
           r.sheetNotes?.length ? h("div", { class: "l2 snote" }, `Sheet note: ${r.sheetNotes.join(" · ")}`) : null,
           r.workedByOther ? h("div", { class: "l2 byo" }, r.workedByOther.sameContact ? `${r.workedByOther.by} reached out to this person on ${fmt.day(r.workedByOther.at)}` : `Account being worked: ${r.workedByOther.by} contacted ${r.workedByOther.contactName ?? "a colleague"} at this company on ${fmt.day(r.workedByOther.at)}`) : null,
-          h("div", { class: "l2 faint" }, `${partOf(e)} · Last contacted: ${r.lastContacted ? fmt.day(r.lastContacted) : "Never"} · Owner: ${r.sdrName}`))));
+          h("div", { class: "l2 faint" }, `${partOf(e)} · Last contacted: ${r.lastContacted ? fmt.day(r.lastContacted) : "Never"} · Owner: ${r.sdrName}`)))]));
       if (gl.length === 1 || i === 0) (det as HTMLDetailsElement).open = true;
       return det;
     }));

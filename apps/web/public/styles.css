@@ -739,3 +739,12 @@ details.moresec > summary { cursor: pointer; font-weight: 600; padding: 8px 0; o
 .lead input.redact{width:16px;height:16px;cursor:pointer;margin:0}
 .lead.gone{opacity:0;transition:opacity .25s}
 .lead .snote{font-size:13px;margin-top:3px;color:#1d4ed8}
+
+.lead.u,.lead.t{border-left:3px solid #16a34a}
+.subhd{padding:8px 14px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;border-top:1px solid rgba(0,0,0,.07)}
+.subhd.go{color:#15803d;background:#f0fdf4}.subhd.done{color:#6b7280;background:rgba(0,0,0,.03)}
+.evgrp .unw{color:#15803d}
+.hwtable.simple{table-layout:fixed;width:100%}
+.hwtable.simple th:first-child,.hwtable.simple td:first-child{width:46%;white-space:normal;overflow-wrap:anywhere}
+.hwtable.simple td,.hwtable.simple th{white-space:normal;overflow-wrap:anywhere}
+.rectools{flex-wrap:wrap}.rectools select{max-width:100%}
