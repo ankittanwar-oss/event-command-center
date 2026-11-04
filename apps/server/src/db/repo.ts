@@ -78,6 +78,7 @@ export async function loadDataset(db: Q = getPool()): Promise<Dataset> {
       id: r.id, name: r.name, domain: r.domain, country: r.country, sdrOwnerId: r.sdr_owner_id, allocationDate: d(r.allocation_date),
       allocationSource: r.allocation_source, unassignmentDate: d(r.unassignment_date), icpTier: r.icp_tier, competitorFlag: r.competitor_flag,
       temperatureRaw: r.temperature_raw, lifecycleStage: r.lifecycle_stage, hubspotOwnerId: r.hubspot_owner_id ?? null, intent: r.intent ?? undefined,
+      previousSdrOwnerId: Array.isArray(r.sdr_history) ? (r.sdr_history as Array<{ value: string; timestamp: string }>).sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp))).map((x) => String(x.value ?? "")).find((v) => v && v !== r.sdr_owner_id) ?? null : null,
     };
     ds.companies.set(c.id, c);
   }
@@ -86,7 +87,7 @@ export async function loadDataset(db: Q = getPool()): Promise<Dataset> {
       id: r.id, firstName: r.first_name, lastName: r.last_name, email: r.email, jobTitle: r.job_title, country: r.country,
       companyId: r.company_id, lifecycleStage: r.lifecycle_stage, leadStatus: r.lead_status, doNotContact: !!r.do_not_contact,
       attendedDate: d(r.attended_date), companyIds: Array.isArray(r.company_ids) ? r.company_ids : undefined,
-      ownerId: r.hubspot_owner_id ?? null, sdrOwnerId: r.contact_sdr_owner_id ?? null,
+      ownerId: r.hubspot_owner_id ?? null, sdrOwnerId: r.contact_sdr_owner_id ?? null, scores: r.scores ?? undefined,
     };
     ds.contacts.set(c.id, c);
   }

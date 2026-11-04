@@ -29,6 +29,7 @@ export interface Company {
   temperatureRaw: string | null;      // Company property "Event Leads - Cold/Warm/Surging/Hot"
   lifecycleStage: string | null;
   hubspotOwnerId?: string | null;     // company owner (AE) – used for pod-based SDR routing only
+  previousSdrOwnerId?: string | null; // prior value of SDR Owner (from HubSpot property history), context only
   intent?: AccountIntent | null;      // current company-level account intent (separate from the event-lead temperature)
 }
 
@@ -62,7 +63,11 @@ export interface Contact {
   companyIds?: string[];              // every associated company (HubSpot associations); companyId is the primary
   ownerId?: string | null;            // contact owner (hubspot_owner_id)
   sdrOwnerId?: string | null;         // contact-level SDR field (sdr_from_company)
+  scores?: ContactScores;
 }
+
+/** HubSpot contact-level engagement signals, exactly as recorded (no thresholds invented). */
+export interface ContactScores { attendance: number | null; registration: number | null; engagement: number | null; heyreachIntent: string | null; registeredDate: string | null }
 
 export interface EventRecord {
   id: string;
@@ -252,10 +257,14 @@ export interface LeadFact {
   nextTaskOwnerId?: string | null;
   slaApplies?: boolean;
   accountIntent?: AccountIntent | null;
-  contactLeadStatus?: string | null;    // HubSpot contact Lead Status (structured disposition source)
+  contactLeadStatus?: string | null;
+  contactScores?: ContactScores | null;
+  /** Per event: verified participation (never infers a no-show from missing data). */
+  participation?: "attended" | "registered_only" | "no_show" | "unknown";
+  participationSource?: string | null;    // HubSpot contact Lead Status (structured disposition source)
   nextMeetingAt?: string | null;
   /** Ownership as recorded on each record (for reconciliation; the SDR used everywhere is sdrOwnerId). */
-  ownership?: { companySdrId: string | null; companyOwnerId: string | null; contactOwnerId: string | null; contactSdrId: string | null; companyCount: number; allocationDate: string | null };        // a scheduled meeting in the future (verified commitment)
+  ownership?: { previousSdrId?: string | null; companySdrId: string | null; companyOwnerId: string | null; contactOwnerId: string | null; contactSdrId: string | null; companyCount: number; allocationDate: string | null };        // a scheduled meeting in the future (verified commitment)
   dataQuality: string[];
   priority: number;                   // higher = more urgent
 }

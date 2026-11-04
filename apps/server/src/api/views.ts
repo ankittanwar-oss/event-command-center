@@ -295,7 +295,8 @@ export function events(facts: LeadFact[], q: URLSearchParams, today: string, rul
   const { nf, rows } = filtered(facts, q, today);
   const riskByEvent = new Map<string, ReturnType<typeof riskCounts>>();
   for (const id of new Set(rows.map((f) => f.eventId))) riskByEvent.set(id, riskCounts(rows.filter((f) => f.eventId === id), rules));
-  const list = eventSummaries(rows).map((e) => ({ ...e, risk: riskByEvent.get(e.eventId) ?? null }));
+  const pp = eventParticipation(rows);
+  const list = eventSummaries(rows).map((e) => ({ ...e, risk: riskByEvent.get(e.eventId) ?? null, pp: pp.get(e.eventId) ?? null }));
   const groups = (["owned", "sponsored", "webinar", "roundtable", "uncategorized"] as EventCategory[]).map((c) => ({
     category: c, label: CATEGORY_LABEL[c],
     upcoming: list.filter((e) => e.category === c && e.upcoming).sort((a, b) => (a.date ?? "").localeCompare(b.date ?? "")),
@@ -454,7 +455,7 @@ export function daily(facts: LeadFact[], q: URLSearchParams, today: string, rule
   const cw = contactWorklist(rows, today, rules, disp);
   const contacts = { groups: cw.groups, counts: cw.counts, total: cw.items.length,
     items: cw.items.slice(0, 3000).map((i) => ({ ...i,
-      own: i.ownership ? { companySdr: ownerLabel(i.ownership.companySdrId, rules), companyOwner: ownerLabel(i.ownership.companyOwnerId, rules), contactOwner: ownerLabel(i.ownership.contactOwnerId, rules), contactSdr: ownerLabel(i.ownership.contactSdrId, rules), companyCount: i.ownership.companyCount } : null,
+      own: i.ownership ? { previousSdr: ownerLabel(i.ownership.previousSdrId ?? null, rules), companySdr: ownerLabel(i.ownership.companySdrId, rules), companyOwner: ownerLabel(i.ownership.companyOwnerId, rules), contactOwner: ownerLabel(i.ownership.contactOwnerId, rules), contactSdr: ownerLabel(i.ownership.contactSdrId, rules), companyCount: i.ownership.companyCount } : null,
       lastBy: ownerLabel(i.lastOutboundOwnerId, rules), otherBy: ownerLabel(i.lastOtherSdrTouch?.ownerId ?? null, rules), dealOwner: ownerLabel(i.deal?.ownerId ?? null, rules) })) };
   // Account-first view (same contact items, grouped by HubSpot company id within each SDR).
   const acctList = accountWorklist(contacts.items as any, today, rules);
@@ -490,4 +491,36 @@ export function accountDrill(facts: LeadFact[], q: URLSearchParams, today: strin
   });
   const contactCount = accts.reduce((n, a) => n + a.contacts.length, 0);
   return { metric, label: def.label, contactMetric: !!def.contactsOnly, filters: nf, rowSdr, accounts: accts, accountCount: accts.length, contactCount };
+}
+
+
+/** Per event: verified participation (contacts) and account execution (unique companies) with separate denominators. */
+export function eventParticipation(rows: LeadFact[]) {
+  const out = new Map<string, any>();
+  const by = new Map<string, LeadFact[]>();
+  for (const f of rows) (by.get(f.eventId) ?? by.set(f.eventId, []).get(f.eventId)!).push(f);
+  for (const [id, list] of by) {
+    const part = (f: LeadFact) => f.participation ?? (f.attendance === "attended" ? "attended" : "unknown");
+    const worked = (f: LeadFact) => (f.currentSdrTouches ?? f.touchesSinceEligibility) > 0;
+    const el = list.filter((f) => f.eligible);
+    const acct = new Map<string, { level: string; worked: boolean }>();
+    for (const f of el) {
+      const k = f.companyId ?? `c:${f.contactId}`;
+      const lv = (f.accountIntent?.level ?? "").toLowerCase();
+      const level = lv.startsWith("surging") || lv.startsWith("hot") ? "hot" : lv.startsWith("warm") ? "warm" : lv ? "other" : "unknown";
+      const cur = acct.get(k) ?? { level, worked: false };
+      cur.worked = cur.worked || worked(f);
+      acct.set(k, cur);
+    }
+    const accts = [...acct.values()];
+    const att = el.filter((f) => part(f) === "attended"), reg = el.filter((f) => part(f) === "registered_only" || part(f) === "unknown");
+    out.set(id, {
+      registered: list.length, attended: list.filter((f) => part(f) === "attended").length, registeredOnly: list.filter((f) => part(f) === "registered_only").length,
+      unknown: list.filter((f) => part(f) === "unknown").length, noShow: list.filter((f) => part(f) === "no_show").length,
+      accounts: accts.length, hotAccounts: accts.filter((a) => a.level === "hot").length, warmAccounts: accts.filter((a) => a.level === "warm").length,
+      hotWorked: accts.filter((a) => a.level === "hot" && a.worked).length, warmWorked: accts.filter((a) => a.level === "warm" && a.worked).length,
+      attendeesEligible: att.length, attendeesWorked: att.filter(worked).length, regOnlyEligible: reg.length, regOnlyWorked: reg.filter(worked).length,
+    });
+  }
+  return out;
 }

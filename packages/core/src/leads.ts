@@ -55,6 +55,18 @@ export function expectedTouches(ageDays: number, rule: CadenceRule): number {
   return pts[pts.length - 1]!.touches;
 }
 
+/** Verified participation for one contact-event pair + where it came from. Missing data is never a no-show. */
+export function participationFor(ec: EventContact, contact: Contact | undefined, ev: EventRecord, eventHasAttendance: boolean, rules: Rules, today: string): { status: "attended" | "registered_only" | "no_show" | "unknown"; source: string } {
+  if (!ev.date || ev.date > today) return { status: "unknown", source: "Upcoming event" };
+  if (ec.sheetAttended === true) return { status: "attended", source: "Roundtable attendance sheet (Yes)" };
+  if (ec.sheetAttended === false) return { status: "no_show", source: "Roundtable attendance sheet (confirmed No)" };
+  const inWindow = (d: string | null) => { if (!d) return false; const diff = daysBetween(ev.date!, d); return diff >= -rules.attendanceWindow.daysBefore && diff <= rules.attendanceWindow.daysAfter; };
+  if (inWindow(toDate(ec.attendedAt)) || inWindow(toDate(contact?.attendedDate ?? null))) return { status: "attended", source: "HubSpot \"Date Engaged 'Event Attended Date'\" within the event window" };
+  return eventHasAttendance
+    ? { status: "registered_only", source: "Registered (HubSpot event association); no attendance record for this person" }
+    : { status: "unknown", source: "Registered (HubSpot event association); no attendance data recorded for this event" };
+}
+
 export function attendanceFor(ec: EventContact, contact: Contact | undefined, ev: EventRecord, eventHasAttendance: boolean, rules: Rules, today: string): AttendanceStatus {
   if (!ev.date || ev.date > today) return "unknown";
   // The roundtable sheet is the source of truth for attendance when it has a Yes/No for this person.
@@ -113,7 +125,10 @@ export function computeLeadFact(
   const podMap = rules.podAeToSdr ?? {};
   const podSdrs = new Set(Object.values(podMap));
   const podSdr = company?.hubspotOwnerId ? podMap[company.hubspotOwnerId] ?? null : null;
-  const viaPod = !!podSdr && !(companySdr && podSdrs.has(companySdr));
+  // The Company "SDR Owner" is authoritative whenever it names a roster SDR (e.g. an account moved from Bobbi to Jody
+  // keeps Allison as AE but must show under Jody). Pod routing only fills the gap when the SDR Owner is empty or is not
+  // a roster SDR (e.g. the outreach pseudo-SDR "Anna S").
+  const viaPod = !!podSdr && !(companySdr && (podSdrs.has(companySdr) || isRosterSdr(companySdr)));
   const sdrRaw = viaPod ? podSdr : companySdr;
   const sdr = isRosterSdr(sdrRaw) ? sdrRaw : null;
   if (company && !companySdr && !viaPod) dq.push("sdr_missing");
@@ -126,6 +141,7 @@ export function computeLeadFact(
   if (company && !company.icpTier) dq.push("icp_tier_missing");
 
   const attendance = attendanceFor(ec, contact, ev, eventHasAttendance, rules, today);
+  const participation = participationFor(ec, contact, ev, eventHasAttendance, rules, today);
   const isUpcoming = !!ev.date && ev.date > today;
 
   const contactActs = ds.activitiesByContact.get(contact.id) ?? [];
@@ -343,8 +359,9 @@ export function computeLeadFact(
     lastReplyAt, lastOutboundAt: lastOutbound?.timestamp ?? null, lastOutboundOwnerId: lastOutbound?.ownerId ?? null, lastOutboundKind: lastOutbound?.kind ?? null, lastMeetingAt,
     currentSdrTouchesSinceAllocation: sdr && allocationDate ? touches.filter((t) => t.ownerId === sdr && day(t) >= allocationDate).length : null,
     currentSdrTouches, otherSdrTouches, lastOtherSdrTouch, lastTouchOwnerId, currentSdrLastTouchAt,
-    nextTaskSubject: nextTask?.subject ?? null, nextTaskOwnerId: nextTask?.ownerId ?? null, slaApplies: !noSla, contactLeadStatus: contact.leadStatus ?? null, accountIntent: company?.intent === undefined ? undefined : company.intent,
-    ownership: { companySdrId: company?.sdrOwnerId ?? null, companyOwnerId: company?.hubspotOwnerId ?? null, contactOwnerId: contact.ownerId ?? null,
+    nextTaskSubject: nextTask?.subject ?? null, nextTaskOwnerId: nextTask?.ownerId ?? null, slaApplies: !noSla, contactLeadStatus: contact.leadStatus ?? null, contactScores: contact.scores ?? null,
+    participation: participation.status, participationSource: participation.source, accountIntent: company?.intent === undefined ? undefined : company.intent,
+    ownership: { previousSdrId: company?.previousSdrOwnerId ?? null, companySdrId: company?.sdrOwnerId ?? null, companyOwnerId: company?.hubspotOwnerId ?? null, contactOwnerId: contact.ownerId ?? null,
       contactSdrId: contact.sdrOwnerId ?? null, companyCount: contact.companyIds?.length ?? (contact.companyId ? 1 : 0), allocationDate },
     nextMeetingAt: contactActs.filter((a) => a.kind === "MEETING" && toDate(a.timestamp)! > today).map((a) => a.timestamp).sort()[0] ?? null,
     firstTouchSlaMet: noSla ? null : slaMet, firstTouchOverdue: noSla ? false : overdue, expectedTouches: expected,

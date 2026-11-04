@@ -379,17 +379,25 @@ export type ContactGroup = (typeof CONTACT_GROUPS)[number]["key"];
 export interface ContactAction { group: ContactGroup; action: string; reason: string; color: ActionColor; due: string | null; overdueBusinessDays: number | null; sort: number; historicalDue?: string | null }
 
 /** Why this contact matters, from verified evidence only. Sponsored-event attendance is not SpotDraft engagement. */
-export function engagementReason(f: LeadFact): { text: string; strength: number } {
+/** CONTACT engagement priority (dashboard-only, from verified evidence; independent of company intent):
+ *   0 P1 high intent: real reply / meeting (recent or scheduled)
+ *   1 P2 verified attendance at a SpotDraft-run event (owned, webinar, roundtable)
+ *   2 P3 verified attendance at a sponsored conference (SpotDraft engagement unverified)
+ *   3 P4 registered only / attendance unknown
+ *   4 P5 no qualifying individual engagement (e.g. confirmed no-show): company intent only */
+export const ENGAGEMENT_LABEL = ["High intent", "Verified attendee", "Conference attendee", "Registered only", "Company intent only"] as const;
+export function engagementReason(f: LeadFact): { text: string; strength: number; label: string; participation: string } {
+  const p = f.participation ?? (f.attendance === "attended" ? "attended" : f.attendance === "no_show" ? "registered_only" : "unknown");
+  const mk = (text: string, strength: number) => ({ text, strength, label: ENGAGEMENT_LABEL[strength]!, participation: p });
   const reply = /^Prospect replied/.test(f.inPlayReason ?? "") ? replyDate(f) : null;
-  if (reply) return { text: `Replied ${reply}`, strength: 0 };
-  if (f.nextMeetingAt) return { text: `Meeting scheduled ${toDate(f.nextMeetingAt)}`, strength: 0 };
-  if (/^Meeting on/.test(f.inPlayReason ?? "")) return { text: (f.inPlayReason ?? "").replace("Meeting on", "Meeting"), strength: 0 };
+  if (reply) return mk(`Replied to SDR ${reply}`, 0);
+  if (f.nextMeetingAt) return mk(`Meeting scheduled ${toDate(f.nextMeetingAt)}`, 0);
+  if (/^Meeting on/.test(f.inPlayReason ?? "")) return mk((f.inPlayReason ?? "").replace("Meeting on", "Meeting"), 0);
   const ev = f.eventName.split(/[|:]/)[0]!.trim().slice(0, 40);
-  if (f.attendance === "attended") return f.eventCategory === "sponsored"
-    ? { text: `Attended ${ev} (sponsored · SpotDraft engagement unverified)`, strength: 3 }
-    : { text: `Attended ${ev}`, strength: 1 };
-  if (f.attendance === "no_show") return { text: `Registered, did not attend ${ev}`, strength: 4 };
-  return { text: `Registered for ${ev}${f.eventCategory === "sponsored" ? " (sponsored)" : ""} · attendance not recorded`, strength: 4 };
+  if (p === "attended") return f.eventCategory === "sponsored" ? mk(`Attended ${ev} (conference; SpotDraft engagement unverified)`, 2) : mk(`Verified attendee: ${ev}`, 1);
+  if (p === "no_show") return mk(`Registered for ${ev}; confirmed no-show`, 4);
+  if (p === "registered_only") return mk(`Registered for ${ev}; no attendance record`, 3);
+  return mk(`Registered for ${ev}; attendance unknown`, 3);
 }
 
 /** Current company intent, normalised for decisions: "hot" (Surging), "warm", "cold", or "unknown" (not recorded / not synced). */
@@ -531,7 +539,9 @@ export function contactWorklist(rows: LeadFact[], today: string, rules: Rules, d
       sql: sqlD ? "yes" : "no", sqlNote: anyMissingSql ? "open deal has no Became Qualified to Buy Date" : null,
       deal: openDeal ? { name: openDeal.name, stage: openDeal.stageLabel, id: openDeal.id, via: openDeal.via, ownerId: openDeal.ownerId ?? null, sqlDate: openDeal.sqlDate ?? null } : null,
       deals,
-      events: leads.map((l) => ({ id: l.eventId, name: l.eventName, date: l.eventDate, category: l.eventCategory, attendance: l.attendance })),
+      events: leads.map((l) => ({ id: l.eventId, name: l.eventName, date: l.eventDate, category: l.eventCategory, attendance: l.attendance,
+        participation: l.participation ?? (l.attendance === "attended" ? "attended" : "unknown"), participationSource: l.participationSource ?? null })),
+      engagementLabel: best.label, scores: f.contactScores ?? null,
     };
   });
   items.sort((a, b) => a.sort - b.sort || a.intentRank - b.intentRank || a.engagementStrength - b.engagementStrength || (a.temperature === "Hot" ? -1 : 0) - (b.temperature === "Hot" ? -1 : 0) || (a.due ?? "9").localeCompare(b.due ?? "9"));
@@ -597,10 +607,14 @@ export function accountWorklist(items: CItem[], today?: string, rules?: Rules) {
     else if (daysSinceLast < 7) primary = { action: "Recently contacted", reason: `Last account outreach ${bd(daysSinceLast)}`, color: "green" };
     else primary = { action: daysSinceLast >= 30 ? "No activity in 30+ business days" : daysSinceLast >= 14 ? "Stale activity · follow-up opportunity" : "Follow-up opportunity", reason: `Last account outreach ${bd(daysSinceLast)}`, color: "grey" };
     // Secondary, informational opportunities inside the account.
+    const attendees = cs.filter((c) => c.events.some((e: any) => e.participation === "attended")).length;
+    const registeredOnly = cs.filter((c) => !c.events.some((e: any) => e.participation === "attended") && c.events.some((e: any) => e.participation === "registered_only" || e.participation === "unknown")).length;
+    const best = [...cs].sort((x, y) => x.engagementStrength - y.engagementStrength || (y.yourTouches > 0 ? 0 : 1) - (x.yourTouches > 0 ? 0 : 1))[0]!;
     const inactive30 = worked.filter((c) => (c.daysSinceTouch ?? 0) >= 30 && c.group !== "paused").length;
     const opportunities = [inactive30 ? `${inactive30} contact${inactive30 === 1 ? "" : "s"} inactive 30+ business days` : null, cs.length - worked.length ? `${cs.length - worked.length} contact${cs.length - worked.length === 1 ? "" : "s"} not worked` : null].filter(Boolean).join(" · ");
     return {
-      primary, opportunities,
+      primary, opportunities, attendees, registeredOnly,
+      bestContact: { contactId: best.contactId, name: best.contactName, title: best.jobTitle, engagement: best.engagement, label: (best as any).engagementLabel, strength: best.engagementStrength },
       daysSinceLast, slaBreach: !isWorked && cs.some((c) => c.group === "first_outreach" && c.color === "red"),
       overdueCommitment: cs.some((c) => c.group === "respond" && c.color === "red"),
       key, companyId: cs[0]!.companyId, companyName: cs[0]!.companyName ?? cs[0]!.contactName, intent: cs[0]!.intent, sdrOwnerId: cs[0]!.sdrOwnerId, sdrName: cs[0]!.sdrName,
@@ -614,7 +628,8 @@ export function accountWorklist(items: CItem[], today?: string, rules?: Rules) {
     };
   });
   const rank: Record<string, number> = Object.fromEntries(ACCOUNT_BUCKETS.map((b, i) => [b.key, i]));
-  accounts.sort((a, b) => rank[a.bucket]! - rank[b.bucket]! || a.top.sort - b.top.sort || (a.top.intentRank ?? 2) - (b.top.intentRank ?? 2) || (a.companyName ?? "").localeCompare(b.companyName ?? ""));
+  // Within a bucket: urgency (tasks, replies, SLA), then the best CONTACT's verified engagement, then COMPANY intent.
+  accounts.sort((a, b) => rank[a.bucket]! - rank[b.bucket]! || a.top.sort - b.top.sort || a.bestContact.strength - b.bestContact.strength || (a.top.intentRank ?? 2) - (b.top.intentRank ?? 2) || (a.companyName ?? "").localeCompare(b.companyName ?? ""));
   return accounts;
 }
 

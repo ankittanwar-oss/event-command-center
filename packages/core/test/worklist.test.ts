@@ -325,3 +325,38 @@ test("Link Logistics pattern: account recency = latest SDR touch to ANY contact;
   assert.equal(ACCOUNT_METRICS.stale14!.test(a), false);
   assert.equal(accountSummary([a]).stale14, 0);
 });
+
+describe("current ownership, verified participation and contact priority", () => {
+  const NOV = "2026-11-04";
+  const P = rules({ podAeToSdr: { "79976078": "87607260" } }); // Allison Green (AE) -> Bobbi (pod)
+  test("Test A pattern: SDR Owner = Jody with AE Allison stays Jody's (no pod override); Anna S still routes to the pod", () => {
+    const jody = computeLeadFacts(dataset({ companies: [company({ sdrOwnerId: "97411405", hubspotOwnerId: "79976078" })] }), P, NOV)[0]!;
+    assert.equal(jody.sdrOwnerId, "97411405");
+    const anna = computeLeadFacts(dataset({ companies: [company({ sdrOwnerId: "86492694", hubspotOwnerId: "79976078" })] }), P, NOV)[0]!;
+    assert.equal(anna.sdrOwnerId, "87607260");
+  });
+  test("registration vs attendance: never infer a no-show; sheet 'No' is the only confirmed no-show", async () => {
+    const { participationFor } = await import("../src/index.js");
+    const ev = event({ date: "2026-10-01" });
+    const R2 = rules();
+    assert.equal(participationFor({ eventId: "e1", contactId: "c1", attendedAt: null }, contact(), ev, false, R2, NOV).status, "unknown");
+    assert.equal(participationFor({ eventId: "e1", contactId: "c1", attendedAt: null }, contact(), ev, true, R2, NOV).status, "registered_only");
+    assert.equal(participationFor({ eventId: "e1", contactId: "c1", attendedAt: "2026-10-01" }, contact(), ev, true, R2, NOV).status, "attended");
+    assert.equal(participationFor({ eventId: "e1", contactId: "c1", attendedAt: null, sheetAttended: false }, contact(), ev, true, R2, NOV).status, "no_show");
+  });
+  test("Tests B–D pattern: attendee outranks registration-only; one account, contacts classified independently", async () => {
+    const { contactWorklist, accountWorklist } = await import("../src/index.js");
+    const ds = dataset({
+      companies: [company({ intent: { level: "Warm", raw: "Warm Account", since: "2026-09-01", warmAt: null, surgingAt: null, coldAt: null, reason: null, recentSignals: null } as any })],
+      contacts: [contact({ id: "a" }), contact({ id: "r" }), contact({ id: "n" })],
+      links: [["e1", "a", "2026-10-01"], ["e1", "r"], ["e1", "n"]],
+    });
+    const items = contactWorklist(computeLeadFacts(ds, rules(), NOV), NOV, rules()).items;
+    const by = Object.fromEntries(items.map((i) => [i.contactId, i]));
+    assert.equal(by.a!.engagementStrength, 1); assert.match(by.a!.engagement, /Verified attendee/);
+    assert.equal(by.r!.engagementStrength, 3); assert.match(by.r!.engagement, /Registered for .*no attendance record/);
+    const [acc] = accountWorklist(items, NOV, rules());
+    assert.equal(acc!.attendees, 1); assert.equal(acc!.registeredOnly, 2); assert.equal(acc!.bestContact.contactId, "a");
+    assert.equal(accountWorklist(items, NOV, rules()).length, 1);
+  });
+});

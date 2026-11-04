@@ -61,8 +61,11 @@ export async function dailyView(route: Route, meta: any): Promise<HTMLElement> {
   // ---- filters (search matches company OR contact; a matching contact brings its whole account so context stays visible)
   const matchContact = (i: any) => !!q && [i.contactName, i.jobTitle, i.contactEmail, ...i.events.map((e: any) => e.name)].some((v) => (v ?? "").toLowerCase().includes(q));
   // Accounts come from the server (grouped by HubSpot company id). Filters keep an account when any of its contacts match.
-  const okContact = (i: any) => (!intentF || (intentF === "hotwarm" ? ["hot", "warm"].includes(i.intent?.level) : i.intent?.level === intentF)) && (!ev || i.events.some((e: any) => e.id === ev));
-  const accounts: any[] = d.accountView.items.filter((a: any) => a.contacts.some(okContact) &&
+  const engF = x.get("eng") ?? "", partF = x.get("part") ?? "", workF = x.get("work") ?? "";
+  const okContact = (i: any) => (!intentF || (intentF === "hotwarm" ? ["hot", "warm"].includes(i.intent?.level) : i.intent?.level === intentF)) && (!ev || i.events.some((e: any) => e.id === ev))
+    && (!engF || String(i.engagementStrength) === engF)
+    && (!partF || (partF === "attended" ? i.events.some((e: any) => e.participation === "attended") : !i.events.some((e: any) => e.participation === "attended") && i.events.some((e: any) => e.participation === "registered_only" || e.participation === "unknown")));
+  const accounts: any[] = d.accountView.items.filter((a: any) => a.contacts.some(okContact) && (!workF || (workF === "worked" ? a.worked : !a.worked)) &&
     (!q || (a.companyName ?? "").toLowerCase().includes(q) || a.contacts.some(matchContact)));
   const base: any[] = accounts.flatMap((a) => a.contacts);
   const hits = new Set(base.filter(matchContact).map((i) => i.contactId));
@@ -97,6 +100,9 @@ export async function dailyView(route: Route, meta: any): Promise<HTMLElement> {
   const controls = h("div", { class: "wctl" }, search,
     sel("intent", intentF, [["", "Any account intent"], ["hotwarm", "Hot + Warm"], ["hot", "Hot (Surging)"], ["warm", "Warm"], ["cold", "Cold"], ["unknown", "Unknown"]]),
     sel("ev", ev, [["", "All events"], ...[...evs.entries()]]),
+    sel("eng", engF, [["", "Any contact engagement"], ["0", "High intent (reply/meeting)"], ["1", "Verified attendee"], ["2", "Conference attendee"], ["3", "Registered only / unknown"], ["4", "Company intent only"]]),
+    sel("part", partF, [["", "Attended or registered"], ["attended", "Verified attendees"], ["registered", "Registered only / unknown"]]),
+    sel("work", workF, [["", "Worked + unworked"], ["worked", "Worked"], ["unworked", "Unworked"]]),
     h("span", { class: "xall" }, h("button", { class: "linkbtn", onclick: () => { for (const b of BUCKETS) setOpen(b.key, true); } }, "Expand all"), " · ",
       h("button", { class: "linkbtn", onclick: () => { for (const b of BUCKETS) setOpen(b.key, false); } }, "Collapse all")));
 
@@ -109,7 +115,8 @@ export async function dailyView(route: Route, meta: any): Promise<HTMLElement> {
     return h("div", { class: `ctrow c-${i.color} ${hits.has(i.contactId) ? "hit" : ""}` },
       h("span", { class: "cdot2" }),
       h("div", { class: "ctn" }, h("span", { class: "link", onclick: () => details(i) }, i.contactName), " ", hsLink("contact", i.contactId), i.jobTitle ? h("span", { class: "faint" }, ` · ${i.jobTitle}`) : null,
-        h("div", { class: "faint ctev" }, i.engagement)),
+        h("div", { class: "faint ctev" }, h("span", { class: `epill e${i.engagementStrength}` }, i.engagementLabel ?? ""), " ", i.engagement,
+          i.events.length > 1 ? ` · ${i.events.map((e: any) => `${(e.name ?? "").split(/[|:]/)[0].trim().slice(0, 18)}: ${e.participation === "attended" ? "attended" : e.participation === "no_show" ? "no-show" : e.participation === "registered_only" ? "registered only" : "unknown"}`).join(" · ")}` : "")),
       h("div", { class: "ctl" }, h("div", null, `Last: ${last}`), h("div", { class: "faint" }, `${i.yourTouches} by ${firstName(i.sdrName) || "SDR"}${prev}`)),
       h("div", { class: "cta" }, h("span", { class: "cact" }, i.multithread ? "Optional: multithread" : i.action), h("span", { class: "ctime" }, i.multithread ? "" : timing),
         h("div", { class: "faint cwhy" }, i.multithread ? "Account already worked; another stakeholder you could engage" : i.reason)));
@@ -142,8 +149,9 @@ export async function dailyView(route: Route, meta: any): Promise<HTMLElement> {
         chev,
         h("div", { class: "aname" }, h("b", null, a.companyName ?? "(no company)"), " ", a.companyId ? h("span", { onclick: (e: Event) => e.stopPropagation() }, hsLink("company", a.companyId)) : null, " ", intentPill(a.intent),
           h("div", { class: "faint awhy" }, intentWhy(a.intent))),
-        h("div", { class: "astat" }, h("div", null, h("span", { class: `wk ${a.worked ? "y" : "n"}` }, status), ` · ${a.coverage.worked}/${a.coverage.available} contacts worked`),
-          h("div", { class: "faint" }, a.lastSdrTouch ? `Last contacted ${fmt.day(a.lastSdrTouch)}${a.daysSinceLast !== null && a.daysSinceLast !== undefined ? ` · ${a.daysSinceLast} bd ago` : ""}` : "Not contacted by the SDR yet", !f.sdr && a.sdrName ? ` · ${a.sdrName}` : "")),
+        h("div", { class: "astat" }, h("div", null, h("span", { class: `wk ${a.worked ? "y" : "n"}` }, status), ` · ${a.coverage.worked}/${a.coverage.available} contacts worked · ${a.attendees} attended · ${a.registeredOnly} registered only`),
+          h("div", { class: "faint" }, "Best contact: ", a.bestContact.name, " · ", h("span", { class: `epill e${a.bestContact.strength}` }, a.bestContact.label)),
+          h("div", { class: "faint" }, a.lastSdrTouch ? `Last contacted ${fmt.day(a.lastSdrTouch)}${a.daysSinceLast !== null && a.daysSinceLast !== undefined ? ` · ${a.daysSinceLast} bd ago` : ""}` : "Not contacted by the SDR yet", ` · Owner: ${a.sdrName ?? "Unassigned"}`)),
         h("div", { class: "aact" }, h("div", { class: `cact ac-${a.primary.color}` }, a.primary.action,
           a.bucket === "respond" && t.overdueBusinessDays ? h("span", { class: "ctime" }, ` · ${t.overdueBusinessDays} bd overdue`) : null),
           h("div", { class: "faint" }, a.opportunities || secondary))),
@@ -220,7 +228,8 @@ async function details(i: any) {
       kv("Event-lead label", i.temperature ? `${i.temperature} (event classification, kept separate from current intent)` : null))),
     sec("Ownership", h("div", { class: "kv tight" },
       kv("Assigned SDR (used here)", `${i.sdrName ?? "Not assigned"}${i.sdrSource === "pod_ae" ? " (via the company AE's pod)" : ""}`),
-      kv("Company SDR owner", who(i.own?.companySdr) ?? "Not set"),
+      kv("Company SDR owner (current, HubSpot)", who(i.own?.companySdr) ?? "Not set"),
+      kv("Previous SDR owner", who(i.own?.previousSdr)),
       kv("Company owner (AE)", who(i.own?.companyOwner) ?? "Not set"),
       kv("Contact owner", who(i.own?.contactOwner) ?? "Not set"),
       kv("Contact SDR field", who(i.own?.contactSdr) ?? "Not set"),
@@ -232,7 +241,8 @@ async function details(i: any) {
       h("div", null, h("span", { class: "link", onclick: () => dispositionForm("contact", i.contactId, i.contactName, i.disposition) }, i.disposition ? "Edit contact disposition" : "Set contact disposition"))),
     // 2. CONTACT ENGAGEMENT
     sec("Contact engagement", h("div", { class: "kv tight" },
-      kv("Event engagement", i.engagement),
+      kv("Contact engagement", [h("span", { class: `epill e${i.engagementStrength}` }, i.engagementLabel ?? ""), " ", i.engagement]),
+      kv("HubSpot scores", i.scores ? `Event attendance ${i.scores.attendance ?? "–"} · Event registration ${i.scores.registration ?? "–"} · Contact engagement ${i.scores.engagement ?? "–"}${i.scores.heyreachIntent ? ` · HeyReach intent ${i.scores.heyreachIntent}` : ""}` : "Not synced yet"),
       kv("Active conversation", i.conversation ?? "None in the last 30 days"),
       kv("Last contacted", i.lastOutboundAt ? `${fmt.day(i.lastOutboundAt)} · ${who(i.lastBy) ?? "owner not recorded"}${kindTxt(i.lastOutboundKind) ? ` · ${kindTxt(i.lastOutboundKind)}` : ""}` : "Not contacted yet"),
       kv("Last prospect reply", i.lastReplyAt ? fmt.day(i.lastReplyAt) : "None recorded"),
@@ -249,7 +259,8 @@ async function details(i: any) {
       i.deal ? kv("Associated with", i.deal.via === "contact" ? "This contact" : "The company only (contact may not be involved)") : null,
       i.deal ? kv("Documented next step", "Not synced from HubSpot") : null)),
     more(`Events (${i.events.length})`, h("div", null, i.events.map((e: any) =>
-      h("div", { class: "evline" }, h("span", { class: "link", onclick: () => openLead(e.id, i.contactId) }, e.name), h("span", { class: "faint" }, ` · ${fmt.day(e.date)} · ${e.category} · ${e.attendance === "attended" ? "attended" : e.attendance === "no_show" ? "no-show" : "attendance not recorded"}`))))),
+      h("div", { class: "evline" }, h("span", { class: "link", onclick: () => openLead(e.id, i.contactId) }, e.name), h("span", { class: "faint" }, ` · ${fmt.day(e.date)} · ${e.category} · ${e.participation === "attended" ? "ATTENDED" : e.participation === "no_show" ? "confirmed no-show" : e.participation === "registered_only" ? "registered only" : "attendance unknown"}`),
+        e.participationSource ? h("div", { class: "faint", style: "font-size:11px;margin-left:8px" }, `Source: ${e.participationSource}`) : null)))),
     ...(i.deals?.length ? [more(`All deals (${i.deals.length})`, h("div", { class: "tbl-scroll" }, dealTable(i.deals)))] : []));
   try {
     const r = await api(`leads/${i.eventId}/${i.contactId}`);

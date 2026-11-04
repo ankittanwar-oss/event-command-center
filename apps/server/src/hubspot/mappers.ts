@@ -5,6 +5,8 @@ import { categorizeEvent, toDate, type ActivityKind, type Rules } from "@ecc/cor
 export const CONTACT_PROPERTIES = [
   "firstname", "lastname", "email", "jobtitle", "country", "associatedcompanyid", "lifecyclestage", "hs_lead_status",
   "dnc", "hs_email_optout", "date_engaged__event_attended_date_", "hubspot_owner_id", "sdr_from_company",
+  // Contact-level engagement signals (kept separate from company Account Intent Level)
+  "event_attendance_score", "event_registration_score", "contact_engagement_score", "heyreach_intent", "date_engaged__event_registration_date_",
 ];
 
 export const COMPANY_PROPERTIES = [
@@ -109,8 +111,10 @@ export function mapCompany(r: any, temperatureProperty = "event_leads___cold_war
 export interface ContactRow {
   id: string; first_name: string | null; last_name: string | null; email: string | null; job_title: string | null; country: string | null;
   company_id: string | null; lifecycle_stage: string | null; lead_status: string | null; do_not_contact: boolean; attended_date: string | null;
-  hubspot_owner_id: string | null; contact_sdr_owner_id: string | null; company_ids?: string[] | null;
+  hubspot_owner_id: string | null; contact_sdr_owner_id: string | null; company_ids?: string[] | null; scores?: unknown;
 }
+const num = (v: unknown) => { const x = v === null || v === undefined || v === "" ? NaN : Number(v); return Number.isFinite(x) ? x : null; };
+
 export function mapContact(r: any): ContactRow {
   const p = r.properties ?? {};
   return {
@@ -118,6 +122,8 @@ export function mapContact(r: any): ContactRow {
     company_id: s(p.associatedcompanyid), lifecycle_stage: s(p.lifecyclestage), lead_status: s(p.hs_lead_status),
     do_not_contact: truthy(p.dnc), attended_date: hsDate(p.date_engaged__event_attended_date_),
     hubspot_owner_id: s(p.hubspot_owner_id), contact_sdr_owner_id: s(p.sdr_from_company),
+    scores: { attendance: num(p.event_attendance_score), registration: num(p.event_registration_score), engagement: num(p.contact_engagement_score),
+      heyreachIntent: s(p.heyreach_intent), registeredDate: hsDate(p.date_engaged__event_registration_date_) },
   };
 }
 

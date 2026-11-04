@@ -141,7 +141,7 @@ async function syncAll(hs: HubSpotClient, rules: Rules, full: boolean, records: 
   if (multiCompany) warnings.push(`${multiCompany} contact(s) are associated with more than one company; the primary company is used`);
   records.contacts = await upsert(db, "contacts", [
     "id text", "first_name text", "last_name text", "email text", "job_title text", "country text", "company_id text", "lifecycle_stage text",
-    "lead_status text", "do_not_contact boolean", "attended_date date", "hubspot_owner_id text", "contact_sdr_owner_id text", "company_ids jsonb",
+    "lead_status text", "do_not_contact boolean", "attended_date date", "hubspot_owner_id text", "contact_sdr_owner_id text", "company_ids jsonb", "scores jsonb",
   ], contacts as any, ["id"]);
   const contactById = new Map(contacts.map((c) => [c.id, c]));
   if (contacts.length < contactIds.length) warnings.push(`${contactIds.length - contacts.length} registrant contact(s) could not be read (deleted or merged)`);
@@ -180,6 +180,13 @@ async function syncAll(hs: HubSpotClient, rules: Rules, full: boolean, records: 
     const batch = await hs.batchRead("companies", companyIds.slice(i, i + 50), COMPANY_PROPERTIES.includes(rules.temperature.property) ? COMPANY_PROPERTIES : [...COMPANY_PROPERTIES, rules.temperature.property], ["sdr_owner"]);
     companies.push(...batch.map((r) => mapCompany(r, rules.temperature.property, labels)));
   }
+  // Ownership audit: how many accounts changed Company SDR Owner since the last sync (fresh HubSpot values every run).
+  try {
+    const prev = await db.query<{ id: string; sdr_owner_id: string | null }>("SELECT id, sdr_owner_id FROM companies WHERE id = ANY($1)", [companies.map((c) => c.id)]);
+    const before = new Map(prev.rows.map((r) => [r.id, r.sdr_owner_id]));
+    const moved = companies.filter((c) => before.has(c.id) && (before.get(c.id) ?? null) !== (c.sdr_owner_id ?? null));
+    if (moved.length) warnings.push(`${moved.length} account(s) changed SDR Owner in HubSpot since the last sync; worklists now follow the new owner`);
+  } catch { /* first run */ }
   records.companies = await upsert(db, "companies", [
     "id text", "name text", "domain text", "country text", "sdr_owner_id text", "allocation_date date", "allocation_source text", "unassignment_date date",
     "icp_tier text", "competitor_flag text", "temperature_raw text", "lifecycle_stage text", "hubspot_owner_id text", "sdr_team text", "sdr_history jsonb", "intent jsonb",
