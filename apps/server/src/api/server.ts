@@ -13,7 +13,7 @@ import { clearDisposition, loadDispositions, saveDisposition } from "./dispositi
 import { checkAppAuth, HttpError, readJson, requireAdmin, SECURITY_HEADERS, send } from "./http.js";
 import * as v from "./views.js";
 
-export const BUILD = "update-41";
+export const BUILD = "update-42";
 
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",

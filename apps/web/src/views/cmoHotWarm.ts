@@ -17,11 +17,12 @@ const METRIC_LABEL: Record<string, string> = {
 export async function hotWarmSection(route: Route): Promise<HTMLElement> {
   const f = route.filters;
   const part = route.extra.get("part") ?? "";
-  const d = await api("cmo-hotwarm", { ...filterParams(f), part });
+  const olist = route.extra.get("olist") ?? "";
+  const d = await api("cmo-hotwarm", { ...filterParams(f), part, olist });
   const T = d.thresholds ?? { green: 80, amber: 50 };
   const cls = (v: number | null) => (v === null ? "cv-na" : v >= T.green ? "cv-g" : v >= T.amber ? "cv-a" : "cv-r");
   const go = (patch: Record<string, string>) => { location.hash = buildHash(route.view, f, { ...Object.fromEntries(route.extra), ...patch }); };
-  const drill = (scope: string, id: string, metric: string, name: string) => () => openDrill(f, part, scope, id, metric, name);
+  const drill = (scope: string, id: string, metric: string, name: string) => () => openDrill(f, part, olist, scope, id, metric, name);
 
   const num = (n: number, scope: string, id: string, metric: string, name: string) =>
     h("td", { class: "n hwn" }, n ? h("span", { class: "link", onclick: drill(scope, id, metric, name) }, fmt.n(n)) : h("span", { class: "faint" }, "0"));
@@ -65,9 +66,12 @@ export async function hotWarmSection(route: Route): Promise<HTMLElement> {
       h("div", { class: "hwctl" }, sel("esort", esort, [["gap", "Most unworked"], ["lowest", "Lowest coverage"], ["hot", "Most Hot"], ["warm", "Most Warm"], ["date", "Newest event"]]))),
     h("div", { class: "tbl-wrap" }, h("table", { class: "hwtable simple" },
       h("thead", null, h("tr", null, h("th", null, "Event"), h("th", { class: "n" }, "Hot"), h("th", { class: "n" }, "Hot worked"), h("th", { class: "n" }, "Warm"), h("th", { class: "n" }, "Warm worked"), h("th", { class: "n" }, "Unworked"))),
-      h("tbody", null, evs.map((e) => h("tr", { class: "clickrow", onclick: drill("event", e.eventId, "total", e.name) },
-        h("td", null, e.name), h("td", { class: "n" }, fmt.n(e.hotTotal)), h("td", { class: "n" }, pct(e.hotCoverage, e.hotTotal)),
-        h("td", { class: "n" }, fmt.n(e.warmTotal)), h("td", { class: "n" }, pct(e.warmCoverage, e.warmTotal)), h("td", { class: "n b" }, fmt.n(e.unworked))))))),
+      ...[["Our events (check-ins)", evs.filter((e) => e.category !== "sponsored")], ["Conferences (organiser attendee lists)", evs.filter((e) => e.category === "sponsored")]]
+        .filter(([, l]) => (l as any[]).length).map(([title, l]) => h("tbody", null,
+          h("tr", { class: "grprow" }, h("td", { colspan: "6" }, title as string)),
+          (l as any[]).map((e) => h("tr", { class: "clickrow", onclick: drill("event", e.eventId, "total", e.name) },
+            h("td", null, e.name), h("td", { class: "n" }, fmt.n(e.hotTotal)), h("td", { class: "n" }, pct(e.hotCoverage, e.hotTotal)),
+            h("td", { class: "n" }, fmt.n(e.warmTotal)), h("td", { class: "n" }, pct(e.warmCoverage, e.warmTotal)), h("td", { class: "n b" }, fmt.n(e.unworked)))))))),
     h("div", { class: "hwfoot faint" }, "Click an event to see its leads. Top blocks count each person once; event rows can overlap."));
 
   // ---- SDR table (ALL SDRs pinned; current Company SDR Owner)
@@ -86,14 +90,14 @@ export async function hotWarmSection(route: Route): Promise<HTMLElement> {
 
   const defs = h("details", { class: "hwdefs" }, h("summary", null, "How Hot, Warm and Worked are defined"),
     h("ul", null, Object.values(d.definitions).map((t: any) => h("li", null, t))));
-  return h("div", null, snapshot, eventTable, sdrTable, gaps, defs);
+  return h("div", null, h("div", { class: "kbar" }, h("span", { class: "faint" }, "Showing: "), sel("olist", olist, [["", "All attendees"], ["ours", "Our events only"], ["lists", "Conference lists only"], ["icp", "Conference lists: ICP-fit accounts only"]])), snapshot, eventTable, sdrTable, gaps, defs);
 }
 
-async function openDrill(f: any, part: string, scope: string, id: string, metric: string, name: string) {
+async function openDrill(f: any, part: string, olist: string, scope: string, id: string, metric: string, name: string) {
   const box = h("div", { class: "apanel" }, h("div", { class: "loading" }, "Loading…"));
   openCustom(`${name}: ${METRIC_LABEL[metric] ?? metric}`, "Exact records behind the number, with the dashboard filters applied", box);
   let d: any;
-  try { d = await api("cmo-hotwarm-drill", { ...filterParams(f), part, scope, id, metric }); } catch (e) { box.replaceChildren(h("div", { class: "banner warn" }, (e as Error).message)); return; }
+  try { d = await api("cmo-hotwarm-drill", { ...filterParams(f), part, olist, scope, id, metric }); } catch (e) { box.replaceChildren(h("div", { class: "banner warn" }, (e as Error).message)); return; }
   const rowsAll: any[] = d.rows;
   const search = h("input", { type: "search", placeholder: "Search person, company or event" }) as HTMLInputElement;
   const opt = (pairs: Array<[string, string]>) => pairs.map(([v, l]) => h("option", { value: v }, l));

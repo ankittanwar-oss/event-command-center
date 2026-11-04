@@ -732,3 +732,6 @@ details.moresec > summary { cursor: pointer; font-weight: 600; padding: 8px 0; o
 
 .kblock.tot.hot{background:#9a3412}.kblock.tot.warm{background:#b45309}
 .kblock.ok{background:#15803d}.kblock.bad{background:#b91c1c}
+
+.hwtable .grprow td{background:rgba(0,0,0,.04);font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.03em;padding:8px 12px}
+.kbar{display:flex;align-items:center;gap:8px;margin:0 0 10px}

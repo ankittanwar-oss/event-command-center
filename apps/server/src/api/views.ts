@@ -530,11 +530,23 @@ export function eventParticipation(rows: LeadFact[]) {
 // Population: eligible event-lead records + records whose only gap is a missing SDR owner (reported as "Unassigned").
 // Worked = qualifying outreach by the CURRENT SDR since that event (currentSdrTouches). ALL rows dedupe by Contact ID.
 // =====================================================================================================================
+/** Organiser-list (sponsored conference) attendees can be shown, separated or narrowed to ICP fit. Hot people (a logged
+ *  conversation) are always kept. olist: "" all · "ours" our events only · "lists" organiser lists only · "icp" organiser
+ *  lists narrowed to ICP priority accounts (Tier 1A/1/2), our events unchanged. */
+const isOrgList = (f: LeadFact) => f.eventCategory === "sponsored";
+function keepOrganiserList(f: LeadFact, olist: string) {
+  if (!olist) return true;
+  if (olist === "ours") return !isOrgList(f);
+  if (olist === "lists") return isOrgList(f);
+  if (olist === "icp") return !isOrgList(f) || f.icpPriority || leadHotWarm(f).cls === "hot";
+  return true;
+}
 function hwPopulation(facts: LeadFact[], q: URLSearchParams, today: string) {
   const { nf, rows } = filtered(facts, q, today);
   const part = q.get("part") ?? "";
   const pop = rows.filter((f) => (f.eligible || f.ineligibleReason === "No SDR assigned" || f.ineligibleReason === "SDR not on approved roster")
-    && (!part || participationScope(f) === part));
+    && (!part || participationScope(f) === part)
+    && keepOrganiserList(f, q.get("olist") ?? ""));
   return { nf, pop, part };
 }
 type ByOther = { at: string; ownerId: string | null; contactName: string | null; sameContact: boolean } | null;
