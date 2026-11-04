@@ -44,7 +44,7 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL) {
     const t = s.asOf ?? today();
     return send(res, 200, {
       ...v.metaFor(s.facts, t), freshness: await freshness(), computedAt: s.computedAt, leadCount: s.facts.length,
-      portalId: env.hubspotPortalId, adminEnabled: !!env.adminToken, manualSyncRunning, build: "update-38",
+      portalId: env.hubspotPortalId, adminEnabled: !!env.adminToken, manualSyncRunning, build: "update-39",
     });
   }
 

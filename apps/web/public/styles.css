@@ -719,3 +719,11 @@ details.moresec > summary { cursor: pointer; font-weight: 600; padding: 8px 0; o
 .clickrow{cursor:pointer}.clickrow:hover{background:rgba(0,0,0,.04)}
 .pc{font-weight:600}.n.b{font-weight:700}
 .hwtable.drill td{font-size:13px;vertical-align:top}
+
+.kblock{cursor:pointer;transition:transform .1s}.kblock:hover{transform:translateY(-2px)}
+.evgrp{border:1px solid rgba(0,0,0,.1);border-radius:10px;margin:0 0 10px;background:var(--card,#fff)}
+.evgrp>summary{padding:12px 14px;cursor:pointer;font-size:14px}.evgrp .unw{color:#b45309;font-weight:600}
+.lead{padding:10px 14px;border-top:1px solid rgba(0,0,0,.07)}
+.lead .l1{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.lead .l1 .sp{flex:1}
+.lead .l2{font-size:13px;margin-top:3px;overflow-wrap:anywhere}
+.lead.u{border-left:3px solid #b45309}
