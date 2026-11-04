@@ -679,3 +679,28 @@ export function accountSummary(accounts: ReturnType<typeof accountWorklist>) {
     buckets: Object.fromEntries(ACCOUNT_BUCKETS.map((b) => [b.key, { accounts: n((a) => a.bucket === b.key), contacts: accounts.filter((a) => a.bucket === b.key).reduce((s, a) => s + a.coverage.available, 0) }])),
   };
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// CONTACT-LEVEL Hot / Warm for event reporting (CMO). One definition, derived from the SAME engagement tiers the
+// Daily Command Centre uses (engagementReason). It is NOT the company Account Intent Level.
+//   Hot  = verified two-way engagement with this person: a real prospect reply or a meeting (tier 0)
+//   Warm = verified attendance at the event (tier 1 SpotDraft-run event, tier 2 sponsored conference with a
+//          recorded attended date). Registration only, unknown attendance, no-shows and list inclusion are neither.
+// Mutually exclusive (Hot wins). Per event row the attendance must be for THAT event; Hot is the person's own signal.
+// ---------------------------------------------------------------------------------------------------------------
+export type HotWarm = "hot" | "warm" | null;
+export function leadHotWarm(f: LeadFact): { cls: HotWarm; evidence: string } {
+  const e = engagementReason(f);
+  if (e.strength === 0) return { cls: "hot", evidence: e.text };
+  const p = f.participation ?? (f.attendance === "attended" ? "attended" : "unknown");
+  if (p === "attended") return { cls: "warm", evidence: `${f.eventCategory === "sponsored" ? "Attended conference (attended date recorded)" : "Verified attendee"}: ${f.eventName}` };
+  return { cls: null, evidence: e.text };
+}
+/** Participation scope used by the CMO filter (same statuses as the Daily Command Centre). */
+export function participationScope(f: LeadFact): "attended" | "registered" | "unknown" | "sponsored_list" | "no_show" {
+  const p = f.participation ?? (f.attendance === "attended" ? "attended" : "unknown");
+  if (p === "attended") return "attended";
+  if (p === "no_show") return "no_show";
+  if (f.eventCategory === "sponsored") return "sponsored_list";
+  return p === "registered_only" ? "registered" : "unknown";
+}

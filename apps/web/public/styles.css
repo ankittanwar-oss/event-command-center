@@ -680,3 +680,29 @@ details.moresec > summary { cursor: pointer; font-weight: 600; padding: 8px 0; o
 @media (max-width: 760px) { .ohead { grid-template-columns: 16px 1fr auto; } .odesc { grid-column: 2 / -1; } .oc3 { flex-direction: column; } }
 @media (prefers-color-scheme: dark) { .ocard { border-color: #2f343b; } .ocard:hover { background: #1f2227; } .oc2, .onudge.t-soft { color: #d0d5dd; } .ohl { background: #2b2552; color: #c3b5fd; } }
 .obucket.empty .ocount { color: #98a2b3 !important; }
+/* ---- CMO: Hot & Warm executive tables */
+.hwcard { padding: 14px 16px; margin-bottom: 14px; }
+.hwh { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+.hwh h2, .hwgaps h2 { margin: 0; font-size: 18px; } .hwsub { font-size: 13.5px; color: #475467; margin-top: 2px; }
+.hwctl { display: flex; gap: 8px; flex-wrap: wrap; } .hwsel { height: 32px; font-size: 13px; }
+.hwtable { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 14px; }
+.hwtable th { font-size: 12px; font-weight: 600; color: #475467; text-align: left; padding: 6px 8px; border-bottom: 1px solid #eaecf0; position: sticky; top: 0; background: var(--card, #fff); }
+.hwtable th:first-child { width: 30%; } .hwtable th.n, .hwtable td.n { text-align: right; }
+.hwtable td { padding: 7px 8px; border-bottom: 1px solid #f2f4f7; vertical-align: middle; }
+.hwtable tr.hwtot td { background: #f8f9fc; font-weight: 700; border-bottom: 2px solid #e4e7ec; }
+.hwname .evn { font-weight: 600; overflow-wrap: anywhere; } .hwname .evs { font-size: 12px; }
+.hwn .link { font-weight: 600; }
+.hwc { font-weight: 700; white-space: nowrap; } .hwc .bar { display: inline-block; width: 46px; height: 6px; border-radius: 3px; background: rgba(0,0,0,.08); margin-right: 6px; vertical-align: middle; overflow: hidden; } .hwc .bar i { display: block; height: 100%; background: currentColor; opacity: .6; }
+.cv-g { background: #ecfdf3; color: #067647; } .cv-a { background: #fffaeb; color: #b54708; } .cv-r { background: #fef3f2; color: #b42318; } .cv-na { color: #98a2b3; font-weight: 500; }
+.hwfoot { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-top: 8px; font-size: 12px; }
+.hwlegend { display: flex; align-items: center; gap: 4px; color: #475467; } .hwlegend .sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; border: 1px solid #eaecf0; margin-left: 8px; }
+.hwgaps ul { margin: 8px 0 0; padding-left: 18px; font-size: 14px; } .hwgaps li { margin: 4px 0; }
+.hwdefs { margin: 0 0 14px; font-size: 13px; } .hwdefs summary { cursor: pointer; color: #475467; font-weight: 600; }
+.acctsec > summary { cursor: pointer; list-style: none; display: flex; align-items: baseline; padding: 12px 16px; } .acctsec[open] > summary { border-bottom: 1px solid #eaecf0; }
+.hwlist { display: flex; flex-direction: column; gap: 6px; }
+.hwrow { padding: 8px 10px; border: 1px solid #eaecf0; border-left: 3px solid #d0d5dd; border-radius: 8px; font-size: 13px; } .hwrow.u { border-left-color: #f79009; } .hwrow.w { border-left-color: #12b76a; }
+.hw1 { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; } .hw2 { margin-top: 2px; overflow-wrap: anywhere; }
+.hwcls { font-size: 11px; font-weight: 700; padding: 0 6px; border-radius: 6px; margin-left: auto; } .hwcls.hot { background: #fee4e2; color: #b42318; } .hwcls.warm { background: #fef0c7; color: #93370d; }
+.hwst { font-size: 11px; font-weight: 700; } .hwst.w { color: #067647; } .hwst.u { color: #b54708; }
+@media (max-width: 980px) { .hwtable { font-size: 13px; } .hwtable th:first-child { width: 26%; } .hwc .bar { display: none; } }
+@media (prefers-color-scheme: dark) { .hwtable tr.hwtot td { background: #1f2227; } .cv-g { background: #0f3a24; color: #75e0a7; } .cv-a { background: #4a3510; color: #fec84b; } .cv-r { background: #4a1714; color: #fda29b; } .hwtable th { background: #16181c; } }

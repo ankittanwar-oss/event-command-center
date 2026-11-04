@@ -1,4 +1,5 @@
 import { api } from "../api.js";
+import { hotWarmSection } from "./cmoHotWarm.js";
 import { openAccountDrill } from "../accountDrill.js";
 import { openLeads } from "../drawer.js";
 import { buildHash, filterParams, type FilterState, type Route } from "../state.js";
@@ -14,7 +15,7 @@ const LEVEL_HINT: Record<Risk, string> = {
 
 export async function overviewView(route: Route): Promise<HTMLElement> {
   const f = route.filters;
-  const d = await api("overview", filterParams(f));
+  const [d, hw] = await Promise.all([api("overview", filterParams(f)), hotWarmSection(route)]);
   const open = (bucket: string, patch: Partial<FilterState> = {}, title?: string) => openLeads({ ...f, ...patch }, bucket, {}, title);
   const pctOf = (n: number, of: number) => (of ? fmt.pct(Math.round((n / of) * 1000) / 10) : "–");
   const risk = d.risk.all;
@@ -299,7 +300,11 @@ export async function overviewView(route: Route): Promise<HTMLElement> {
   const banner = h("div", { class: "fbanner" },
     `${fmt.n(all.leads)} eligible event leads · ${fmt.n(all.touched)} first touched (${pcTxt(all.touched, all.leads)}) · ${fmt.n(all.multi)} followed up (${pcTxt(all.multi, all.touched)} of touched) · ${fmt.n(all.leads - all.touched)} not yet touched · ${fmt.n(K(all, "stale"))} no touch in ${IA}+ business days`);
 
+  // Executive view first (contact-level Hot/Warm), then the account-level operational detail, collapsed.
   return h("div", null,
+    hw,
+    h("details", { class: "card acctsec" }, h("summary", { class: "hd" }, h("span", { class: "t" }, "Account Coverage & SDR Activity"),
+      h("span", { class: "muted", style: "margin-left:auto" }, "Account-level and event-lead reporting (different denominators from the tables above) · click to expand")),
     banner,
     accountExec,
     scorecard,
@@ -325,5 +330,6 @@ export async function overviewView(route: Route): Promise<HTMLElement> {
       { key: "coverage", label: "Coverage", num: true, render: (r) => h("div", { class: "cbar" }, bar(r.coverage), fmt.pct(r.coverage)) },
       { key: "multiWeekPct", label: "Multi-week", num: true, render: (r) => fmt.pct(r.multiWeekPct) },
     ], d.regions))),
+    ),
   );
 }

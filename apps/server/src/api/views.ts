@@ -1,6 +1,6 @@
 import {
   accountQueue, applyFilters, BUCKETS, categoryBreakdown, CATEGORY_LABEL, dataQuality, eventSummaries, fiscalQuarterOf, inBucket, nextAction,
-  normalizeFilters, parseQuarterKey, worklist, leadDimensions, ACTION_HEALTH_LABEL, outreachTimeliness, inactivity, overdueSource, deadlineState, leadWork, contactLevelInPlay, actionStatus, contactWorklist, accountWorklist, accountSummary, ACCOUNT_BUCKETS, ACCOUNT_METRICS, DISPOSITION_CODES, type DispositionSet, DEFAULT_RULES, dealOrder, type DealRef, depthStats, sdrDepth, accountDepth, WINDOW_LABEL, BANDS, type TouchWindow, findings, narrative, RISK_LABEL, riskCounts, riskOf, sdrRisk, previousQuarter, qoq, quarterMetrics, regionBreakdown, rosterById, SDR_ROSTER, sdrTable, STATUS_LABEL, temperatureSummary,
+  normalizeFilters, parseQuarterKey, worklist, leadDimensions, ACTION_HEALTH_LABEL, outreachTimeliness, inactivity, overdueSource, deadlineState, leadWork, contactLevelInPlay, actionStatus, contactWorklist, accountWorklist, accountSummary, ACCOUNT_BUCKETS, ACCOUNT_METRICS, leadHotWarm, participationScope, DISPOSITION_CODES, type DispositionSet, DEFAULT_RULES, dealOrder, type DealRef, depthStats, sdrDepth, accountDepth, WINDOW_LABEL, BANDS, type TouchWindow, findings, narrative, RISK_LABEL, riskCounts, riskOf, sdrRisk, previousQuarter, qoq, quarterMetrics, regionBreakdown, rosterById, SDR_ROSTER, sdrTable, STATUS_LABEL, temperatureSummary,
   type EventCategory, type Filters, type LeadFact, type NormalizedFilters, type Region, type Rules,
 } from "@ecc/core";
 
@@ -523,4 +523,111 @@ export function eventParticipation(rows: LeadFact[]) {
     });
   }
   return out;
+}
+
+// =====================================================================================================================
+// CMO: Hot & Warm event-lead coverage (CONTACT level). Uses core leadHotWarm (same tiers as the Daily Command Centre).
+// Population: eligible event-lead records + records whose only gap is a missing SDR owner (reported as "Unassigned").
+// Worked = qualifying outreach by the CURRENT SDR since that event (currentSdrTouches). ALL rows dedupe by Contact ID.
+// =====================================================================================================================
+function hwPopulation(facts: LeadFact[], q: URLSearchParams, today: string) {
+  const { nf, rows } = filtered(facts, q, today);
+  const part = q.get("part") ?? "";
+  const pop = rows.filter((f) => (f.eligible || f.ineligibleReason === "No SDR assigned" || f.ineligibleReason === "SDR not on approved roster")
+    && (!part || participationScope(f) === part));
+  return { nf, pop, part };
+}
+type HwRec = { f: LeadFact; cls: "hot" | "warm"; evidence: string; worked: boolean };
+function hwRecords(pop: LeadFact[]): HwRec[] {
+  const out: HwRec[] = [];
+  for (const f of pop) { const c = leadHotWarm(f); if (c.cls) out.push({ f, cls: c.cls, evidence: c.evidence, worked: (f.currentSdrTouches ?? 0) > 0 }); }
+  return out;
+}
+/** Contact-level rollup across events: Hot if Hot anywhere, else Warm; worked if worked for any of those events. */
+function hwContacts(recs: HwRec[]) {
+  const by = new Map<string, HwRec & { events: string[] }>();
+  for (const r of recs) {
+    const cur = by.get(r.f.contactId);
+    if (!cur) { by.set(r.f.contactId, { ...r, events: [r.f.eventId] }); continue; }
+    cur.events.push(r.f.eventId);
+    if (r.cls === "hot" && cur.cls !== "hot") { cur.cls = "hot"; cur.evidence = r.evidence; cur.f = r.f; }
+    cur.worked = cur.worked || r.worked;
+  }
+  return [...by.values()];
+}
+function hwCounts(list: Array<{ cls: string; worked: boolean }>) {
+  const hot = list.filter((r) => r.cls === "hot"), warm = list.filter((r) => r.cls === "warm");
+  const pct = (n: number, d: number) => (d ? Math.round((n / d) * 1000) / 10 : null);
+  return { hotTotal: hot.length, hotWorked: hot.filter((r) => r.worked).length, hotCoverage: pct(hot.filter((r) => r.worked).length, hot.length),
+    warmTotal: warm.length, warmWorked: warm.filter((r) => r.worked).length, warmCoverage: pct(warm.filter((r) => r.worked).length, warm.length),
+    hotUnworked: hot.filter((r) => !r.worked).length, warmUnworked: warm.filter((r) => !r.worked).length, unworked: list.filter((r) => !r.worked).length };
+}
+
+export function cmoHotWarm(facts: LeadFact[], q: URLSearchParams, today: string, rules: Rules) {
+  const { nf, pop, part } = hwPopulation(facts, q, today);
+  const recs = hwRecords(pop);
+  const contacts = hwContacts(recs);
+  const evMeta = new Map<string, { name: string; date: string | null; category: string }>();
+  for (const f of pop) evMeta.set(f.eventId, { name: f.eventName, date: f.eventDate, category: f.eventCategory });
+  const pp = eventParticipation(pop);
+  const events = [...evMeta.entries()].map(([id, m]) => {
+    // one row per (event, contact): duplicates of the same contact on one event are impossible (event-contact key)
+    const list = recs.filter((r) => r.f.eventId === id);
+    return { eventId: id, ...m, ...hwCounts(list), participation: pp.get(id) ?? null };
+  }).filter((e) => e.hotTotal + e.warmTotal > 0);
+  const sdrIds = [...new Set(contacts.map((c) => c.f.sdrOwnerId ?? "unassigned"))];
+  const sdrs = sdrIds.map((id) => ({ ownerId: id, name: id === "unassigned" ? "Unassigned" : rosterById.get(id)?.name ?? id, ...hwCounts(contacts.filter((c) => (c.f.sdrOwnerId ?? "unassigned") === id)) }));
+  const all = hwCounts(contacts);
+  // Execution gaps: facts only, each linked to its records.
+  const gaps: Array<{ text: string; scope: string; id: string; metric: string }> = [];
+  const topHot = [...events].sort((a, b) => b.hotUnworked - a.hotUnworked)[0];
+  if (topHot && topHot.hotUnworked) gaps.push({ text: `${topHot.name} has the most unworked Hot contacts (${topHot.hotUnworked}).`, scope: "event", id: topHot.eventId, metric: "hot_unworked" });
+  const lowWarm = events.filter((e) => e.warmTotal >= 5 && e.warmCoverage !== null).sort((a, b) => (a.warmCoverage ?? 0) - (b.warmCoverage ?? 0))[0];
+  if (lowWarm && (lowWarm.warmCoverage ?? 100) < (rules.coverageColors?.green ?? 80)) gaps.push({ text: `${lowWarm.name} has the lowest Warm coverage among events with 5+ Warm contacts (${lowWarm.warmCoverage}% of ${lowWarm.warmTotal}).`, scope: "event", id: lowWarm.eventId, metric: "warm_unworked" });
+  const topSdr = sdrs.filter((s) => s.ownerId !== "unassigned").sort((a, b) => b.unworked - a.unworked)[0];
+  if (topSdr && topSdr.unworked) gaps.push({ text: `${topSdr.name} has the largest unworked Hot/Warm backlog (${topSdr.unworked}: ${topSdr.hotUnworked} Hot, ${topSdr.warmUnworked} Warm).`, scope: "sdr", id: topSdr.ownerId, metric: "unworked" });
+  const un = sdrs.find((s) => s.ownerId === "unassigned");
+  if (un && un.hotTotal + un.warmTotal) gaps.push({ text: `${un.hotTotal + un.warmTotal} Hot/Warm event contacts have no SDR owner.`, scope: "sdr", id: "unassigned", metric: "total" });
+  return {
+    filters: nf, participation: part || "all", thresholds: rules.coverageColors ?? { green: 80, amber: 50 },
+    all, events, sdrs, gaps,
+    definitions: {
+      hot: "Hot = verified two-way engagement with this person: a real prospect reply (not auto-replies or calendar notices) or a meeting.",
+      warm: "Warm = verified attendance at the event: an attended date / check-in recorded in HubSpot or the roundtable sheet. Registration, list inclusion, unknown attendance and no-shows are not Warm.",
+      worked: "Worked = at least one qualifying outreach (email, call, LinkedIn) by the contact's CURRENT SDR since that event. Earlier SDRs' outreach is shown in drill-downs, not credited.",
+      company: "Company Account Intent (Hot/Warm/Surging) is shown separately and never makes a contact Hot or Warm.",
+    },
+  };
+}
+
+/** Records behind one CMO Hot/Warm cell. scope = all | event | sdr; metric = hot_total|hot_worked|hot_unworked|warm_*|unworked|total. */
+export function cmoHotWarmDrill(facts: LeadFact[], q: URLSearchParams, today: string, rules: Rules) {
+  const { nf, pop } = hwPopulation(facts, q, today);
+  const scope = q.get("scope") ?? "all", id = q.get("id") ?? "", metric = q.get("metric") ?? "total";
+  const recs = hwRecords(pop);
+  let list: Array<HwRec & { events?: string[] }> = scope === "event" ? recs.filter((r) => r.f.eventId === id) : hwContacts(recs);
+  if (scope === "sdr") list = list.filter((r) => (r.f.sdrOwnerId ?? "unassigned") === id);
+  const [cls, kind] = metric.split("_");
+  if (cls === "hot" || cls === "warm") list = list.filter((r) => r.cls === cls);
+  const k = cls === "hot" || cls === "warm" ? kind : cls;
+  if (k === "worked") list = list.filter((r) => r.worked);
+  if (k === "unworked") list = list.filter((r) => !r.worked);
+  const byContact = new Map<string, LeadFact[]>();
+  for (const f of pop) (byContact.get(f.contactId) ?? byContact.set(f.contactId, []).get(f.contactId)!).push(f);
+  const rows = list.map((r) => {
+    const f = r.f;
+    const all = byContact.get(f.contactId) ?? [f];
+    const lastOwn = all.map((x) => x.currentSdrLastTouchAt).filter(Boolean).sort().pop() ?? null;
+    const lv = (f.accountIntent?.level ?? "") || null;
+    return {
+      contactId: f.contactId, contactName: f.contactName, jobTitle: f.jobTitle, companyId: f.companyId, companyName: f.companyName,
+      sdrName: f.sdrOwnerId ? rosterById.get(f.sdrOwnerId)?.name ?? f.sdrOwnerId : "Unassigned", cls: r.cls, evidence: r.evidence,
+      companyIntent: lv, worked: r.worked, lastSdrOutreach: lastOwn,
+      everWorked: all.some((x) => x.touchesSinceEligibility > 0 || (x.otherSdrTouches ?? 0) > 0), otherSdrTouches: Math.max(0, ...all.map((x) => x.otherSdrTouches ?? 0)),
+      events: (scope === "event" ? [f] : all).map((x) => ({ id: x.eventId, name: x.eventName, date: x.eventDate, category: x.eventCategory, participation: participationScope(x), source: x.participationSource ?? null })),
+    };
+  });
+  rows.sort((a, b) => (a.worked ? 1 : 0) - (b.worked ? 1 : 0) || (a.cls === "hot" ? 0 : 1) - (b.cls === "hot" ? 0 : 1) || (a.companyName ?? "").localeCompare(b.companyName ?? ""));
+  const scopeName = scope === "event" ? pop.find((f) => f.eventId === id)?.eventName ?? id : scope === "sdr" ? (id === "unassigned" ? "Unassigned" : rosterById.get(id)?.name ?? id) : "All events";
+  return { filters: nf, scope, id, metric, scopeName, count: rows.length, rows };
 }

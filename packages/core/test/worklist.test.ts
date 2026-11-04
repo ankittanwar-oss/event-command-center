@@ -375,3 +375,15 @@ test("Instructure pattern: calendar 'Accepted:' notices and replies in an AE's t
   const sdrThread = computeLeadFacts(dataset({ acts: [act({ ts: "2026-10-28" }), act({ ts: "2026-10-30", kind: "INCOMING_EMAIL", direction: "INCOMING_EMAIL", title: "Re: SpotDraft" })] }), R, NOV)[0]!;
   assert.equal(contactAction(sdrThread, NOV, R).group, "respond");
 });
+
+test("CMO contact Hot/Warm: Warm company + registration-only contact is neither; attendee is Warm; reply/meeting is Hot", async () => {
+  const { leadHotWarm, participationScope } = await import("../src/index.js");
+  const NOV = "2026-11-04";
+  const warmCo = company({ intent: { level: "Warm", raw: "Warm Account", since: null, warmAt: null, surgingAt: null, coldAt: null, reason: null, recentSignals: null } as any });
+  const ds = dataset({ companies: [warmCo], contacts: [contact({ id: "r" }), contact({ id: "a" }), contact({ id: "m" })], links: [["e1", "r"], ["e1", "a", "2026-10-01"], ["e1", "m"]],
+    acts: [act({ ts: "2026-11-01T10:00:00Z", contactIds: ["m"], companyIds: [], kind: "MEETING", objectType: "meetings", direction: null })] });
+  const fs = Object.fromEntries(computeLeadFacts(ds, R, NOV).map((f) => [f.contactId, f]));
+  assert.equal(leadHotWarm(fs.r!).cls, null); assert.equal(participationScope(fs.r!), "registered");
+  assert.equal(leadHotWarm(fs.a!).cls, "warm");
+  assert.equal(leadHotWarm(fs.m!).cls, "hot");
+});

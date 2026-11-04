@@ -77,6 +77,8 @@ export interface Rules {
   performanceColors: { coverageTarget: number; followUpTarget: number; amberFraction: number };
   /** "No touch in N business days" engagement indicator (not an SLA). */
   inactivityBusinessDays: number;
+  /** CMO Hot/Warm coverage colours (visual benchmarks, not SLAs): green ≥ green%, amber ≥ amber%, red below. */
+  coverageColors?: { green: number; amber: number };
   /** A reply or meeting counts as an active conversation only within this many calendar days (or a future meeting). */
   conversationRecencyDays: number;
   /** Open deals in these stages (case-insensitive substring of the stage label) do NOT put a lead "in play". */
@@ -133,6 +135,7 @@ export const DEFAULT_RULES: Rules = {
   slaStartDate: "2026-11-01",
   performanceColors: { coverageTarget: 80, followUpTarget: 50, amberFraction: 0.75 },
   inactivityBusinessDays: 14,
+  coverageColors: { green: 80, amber: 50 },
   conversationRecencyDays: 30,
   scorecardTargets: {
     coverage: { green: 80, amber: 50, higherIsBetter: true },        // % of eligible leads touched at least once
