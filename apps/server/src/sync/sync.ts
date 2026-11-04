@@ -372,7 +372,11 @@ async function roundtableSheet(
   hs: HubSpotClient, rules: Rules, events: Array<{ id: string; name: string; event_date: string | null; category: string }>,
   eventContacts: Map<string, string[]>, records: Record<string, number>, warnings: string[],
 ): Promise<Map<string, SheetMerge>> {
-  if (!env.googleServiceAccountJson) return new Map();
+  if (!env.googleServiceAccountJson) {
+    warnings.push("Roundtable sheet NOT read: GOOGLE_SERVICE_ACCOUNT_JSON is not set in Railway, so roundtable registrations/attendance come from HubSpot only.");
+    await setSetting("roundtable_sheet_report", { readAt: null, error: "GOOGLE_SERVICE_ACCOUNT_JSON not set", tabs: [], unmatchedTabs: [] });
+    return new Map();
+  }
   const before = new Map([...eventContacts].map(([k, v]) => [k, [...v]]));
   try {
     let tabs: SheetTab[];

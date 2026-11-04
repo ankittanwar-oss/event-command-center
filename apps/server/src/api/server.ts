@@ -12,8 +12,9 @@ import { getSnapshot, invalidateSnapshot, ownerNames } from "./cache.js";
 import { clearDisposition, loadDispositions, saveDisposition } from "./dispositions.js";
 import { checkAppAuth, HttpError, readJson, requireAdmin, SECURITY_HEADERS, send } from "./http.js";
 import * as v from "./views.js";
+import { loadRedactions, redactedIds, restoreRedaction, saveRedaction, sheetNotes } from "./redactions.js";
 
-export const BUILD = "update-42";
+export const BUILD = "update-44";
 
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
@@ -59,10 +60,11 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL) {
       case "/api/overview": return send(res, 200, v.overview(s.facts, q, t, rules, await loadDispositions()));
       case "/api/leads": return send(res, 200, v.leads(s.facts, q, t, rules));
       case "/api/sdr": return send(res, 200, v.sdrs(s.facts, q, t, rules));
-      case "/api/cmo-hotwarm": return send(res, 200, v.cmoHotWarm(s.facts, q, t, rules));
-      case "/api/cmo-hotwarm-drill": return send(res, 200, v.cmoHotWarmDrill(s.facts, q, t, rules));
+      case "/api/cmo-hotwarm": return send(res, 200, v.cmoHotWarm(s.facts, q, t, rules, { redacted: await redactedIds(), notes: await sheetNotes() }));
+      case "/api/cmo-hotwarm-drill": return send(res, 200, v.cmoHotWarmDrill(s.facts, q, t, rules, { redacted: await redactedIds(), notes: await sheetNotes() }));
+      case "/api/redactions": return send(res, 200, { items: await loadRedactions() });
       case "/api/account-drill": return send(res, 200, v.accountDrill(s.facts, q, t, rules, await loadDispositions()));
-      case "/api/daily": return send(res, 200, v.daily(s.facts, q, t, rules, await loadDispositions()));
+      case "/api/daily": { const red = await redactedIds(); return send(res, 200, v.daily(red.size ? s.facts.filter((f) => !red.has(f.contactId)) : s.facts, q, t, rules, await loadDispositions())); }
       case "/api/depth": return send(res, 200, v.depth(s.facts, q, t, rules));
       case "/api/accounts": return send(res, 200, v.accounts(s.facts, q, t, rules));
       case "/api/events": return send(res, 200, v.events(s.facts, q, t, rules));
@@ -143,6 +145,18 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL) {
   }
 
   // Commercial dispositions: confirmed by a named person; stored in the dashboard database (HubSpot is read-only).
+  // Redacted leads: hidden from the dashboard lists by a person; restorable one by one. HubSpot is never changed.
+  if (method === "POST" && p === "/api/redactions") {
+    const err = await saveRedaction(await readJson(req));
+    if (err) return send(res, 400, { error: err });
+    return send(res, 200, { ok: true });
+  }
+  if (method === "DELETE" && p === "/api/redactions") {
+    const b = await readJson(req);
+    if (!b?.contactId) return send(res, 400, { error: "contactId is required" });
+    await restoreRedaction(String(b.contactId));
+    return send(res, 200, { ok: true });
+  }
   if (method === "POST" && p === "/api/dispositions") {
     const body = await readJson(req);
     const err = await saveDisposition(body);

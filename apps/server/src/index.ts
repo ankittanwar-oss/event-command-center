@@ -17,8 +17,11 @@ async function main() {
   // so a deploy takes effect immediately instead of waiting for the next scheduled sync.
   (async () => {
     if ((await getSetting("facts_build")) === BUILD) return;
-    const n = await recomputeFacts(); invalidateSnapshot(); await setSetting("facts_build", BUILD);
-    log.info("recomputed lead facts for new build", { build: BUILD, leads: n });
+    // Full refresh on every new deploy: re-reads HubSpot AND the roundtable Google Sheet, then recomputes all facts.
+    const r = await runSync("startup");
+    if (r.status !== "success") { const n = await recomputeFacts(); log.info("deploy sync failed; recomputed stored facts", { leads: n }); }
+    invalidateSnapshot(); await setSetting("facts_build", BUILD);
+    log.info("deploy refresh done", { build: BUILD, status: r.status });
   })().catch((e) => log.error("start-up recompute failed", { error: errMessage(e) }));
   // Scheduled refresh inside the web service (no separate worker needed). A Postgres advisory lock prevents
   // overlap with manual refreshes or a separate cron worker. Errors are logged; the last good data stays live.

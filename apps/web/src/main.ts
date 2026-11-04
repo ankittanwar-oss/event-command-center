@@ -1,4 +1,5 @@
 import { api, ApiError } from "./api.js";
+import { redactedView } from "./views/redacted.js";
 import { closeDrawer, sdrNames } from "./drawer.js";
 import { buildHash, parseHash, type FilterState, type Route } from "./state.js";
 import { fmt, h, setPortal } from "./ui.js";
@@ -17,6 +18,7 @@ const VIEWS: Record<string, { label: string; title: string; render: (r: Route, m
   events: { label: "Event operations", title: "Event operations", render: eventsView, filters: true },
   performance: { label: "Event performance", title: "Event performance", render: performanceView, filters: true },
   daily: { label: "Daily Command Centre", title: "Daily Command Centre", render: dailyView, filters: true },
+  redacted: { label: "Redacted leads", title: "Redacted leads", render: () => redactedView(), filters: false },
   quality: { label: "Data quality", title: "Data quality", render: qualityView, filters: true },
   admin: { label: "Admin", title: "Admin & diagnostics", render: adminView, filters: false },
 };

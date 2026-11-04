@@ -128,9 +128,10 @@ async function openDrill(f: any, part: string, olist: string, scope: string, id:
       const un = g.items.filter((x) => !x.r.worked).length;
       const det = h("details", { class: "evgrp" }, h("summary", null, h("b", null, g.name), h("span", { class: "faint" }, ` · ${g.items.length} leads · `), h("span", { class: un ? "unw" : "faint" }, `${un} not worked`)),
         g.items.sort((x, y) => Number(x.r.worked) - Number(y.r.worked)).map(({ r, e }) => h("div", { class: `lead ${r.worked ? "w" : "u"}` },
-          h("div", { class: "l1" }, h("b", null, r.contactName), h("span", { class: `hwcls ${r.cls}` }, r.cls === "hot" ? "Hot" : "Warm"),
+          h("div", { class: "l1" }, redactBox(r), h("b", null, r.contactName), h("span", { class: `hwcls ${r.cls}` }, r.cls === "hot" ? "Hot" : "Warm"),
             h("span", { class: `hwst ${r.worked ? "w" : "u"}` }, r.workedByOther ? `Worked by ${r.workedByOther.by}` : r.worked ? "Worked" : "Not worked"), h("span", { class: "sp" }), hsLink("contact", r.contactId)),
           h("div", { class: "l2" }, `${r.companyName ?? "No company"} · Account intent: ${r.companyIntent ?? "–"} · Status: ${nice(r.contactStatus)}`),
+          r.sheetNotes?.length ? h("div", { class: "l2 snote" }, `Sheet note: ${r.sheetNotes.join(" · ")}`) : null,
           r.workedByOther ? h("div", { class: "l2 byo" }, r.workedByOther.sameContact ? `${r.workedByOther.by} reached out to this person on ${fmt.day(r.workedByOther.at)}` : `Account being worked: ${r.workedByOther.by} contacted ${r.workedByOther.contactName ?? "a colleague"} at this company on ${fmt.day(r.workedByOther.at)}`) : null,
           h("div", { class: "l2 faint" }, `${partOf(e)} · Last contacted: ${r.lastContacted ? fmt.day(r.lastContacted) : "Never"} · Owner: ${r.sdrName}`))));
       if (gl.length === 1 || i === 0) (det as HTMLDetailsElement).open = true;
@@ -141,4 +142,21 @@ async function openDrill(f: any, part: string, olist: string, scope: string, id:
   for (const el of [wSel, cSel, eSel, sSel]) el.addEventListener("change", render);
   box.replaceChildren(head, h("div", { class: "rectools" }, search, wSel, cSel, eSel, sSel), list);
   render();
+}
+
+/** Checkbox in front of every lead: tick = hide this lead (wrong / irrelevant). It moves to the Redacted leads tab. */
+function redactBox(r: any) {
+  const cb = h("input", { type: "checkbox", class: "redact", title: "Hide this lead (wrong or irrelevant). It moves to Redacted leads." }) as HTMLInputElement;
+  cb.addEventListener("change", async () => {
+    if (!cb.checked) return;
+    const reason = prompt(`Hide ${r.contactName}? Optional reason (e.g. wrong person, not a fit):`, "");
+    if (reason === null) { cb.checked = false; return; }
+    const card = cb.closest(".lead") as HTMLElement | null;
+    try {
+      await api("redactions", undefined, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contactId: r.contactId, contactName: r.contactName, companyName: r.companyName, events: r.events.map((e: any) => e.name).join(", "), reason }) });
+      if (card) { card.classList.add("gone"); setTimeout(() => card.remove(), 250); }
+    } catch (e) { cb.checked = false; alert((e as Error).message); }
+  });
+  return cb;
 }

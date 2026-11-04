@@ -2,7 +2,7 @@
 // One tab per roundtable, titled like "Roundtable 7 (27 Oct, 2026)". Column order and header wording differ per tab
 // (e.g. "Attened" in RT1, "Email ID" vs "Email", "HS" vs "HS Link"), so columns are found by header text.
 
-export interface SheetRow { row: number; contactId: string | null; email: string | null; attended: boolean | null; name: string; company: string | null }
+export interface SheetRow { row: number; contactId: string | null; email: string | null; attended: boolean | null; name: string; company: string | null; note?: string | null }
 export interface SheetTab { title: string; number: number | null; date: string | null; rows: SheetRow[]; missingColumns: string[] }
 
 const MONTHS: Record<string, number> = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, sept: 9, oct: 10, nov: 11, dec: 12 };
@@ -45,6 +45,7 @@ export function parseTab(title: string, rows: string[][]): SheetTab {
   const cFirst = col((h) => h === "name" || h.startsWith("first name"));
   const cLast = col((h) => h.startsWith("last name"));
   const cCompany = col((h) => h.startsWith("company name") || h === "company");
+  const cNote = col((h) => /\bnotes?\b/.test(h));
   const missingColumns = [cAtt < 0 ? "Attended" : null, cEmail < 0 && cLink < 0 ? "HS Link / Email" : null].filter((x): x is string => !!x);
   const out: SheetRow[] = [];
   if (hi >= 0) {
@@ -57,7 +58,7 @@ export function parseTab(title: string, rows: string[][]): SheetTab {
       out.push({
         row: hi + 2 + i, contactId, email: email && email.includes("@") ? email : null,
         attended: cAtt >= 0 ? parseAttended(cell(cAtt)) : null,
-        name: [cell(cFirst), cell(cLast)].filter(Boolean).join(" "), company: cell(cCompany) || null,
+        name: [cell(cFirst), cell(cLast)].filter(Boolean).join(" "), company: cell(cCompany) || null, note: cell(cNote) || null,
       });
     });
   }

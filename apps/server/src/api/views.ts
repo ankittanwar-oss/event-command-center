@@ -541,8 +541,25 @@ function keepOrganiserList(f: LeadFact, olist: string) {
   if (olist === "icp") return !isOrgList(f) || f.icpPriority || leadHotWarm(f).cls === "hot";
   return true;
 }
-function hwPopulation(facts: LeadFact[], q: URLSearchParams, today: string) {
-  const { nf, rows } = filtered(facts, q, today);
+export type HwExtra = { redacted: Set<string>; notes: Map<string, Array<{ note: string; tab: string; eventId: string | null }>> };
+const MEETING_NOTE = /meeting\s*(is\s*)?(booked|scheduled|set|done|held)|\bdemo\s*(booked|scheduled)/i;
+/** Accounts with a meeting booked since the event (HubSpot meeting on any contact, or the sheet note says so) are
+ *  already handled and are left out of the Hot/Warm lists. */
+function meetingAccounts(rows: LeadFact[], x: HwExtra) {
+  const out = new Map<string, string>();
+  for (const f of rows) {
+    const key = f.companyId ?? `contact:${f.contactId}`;
+    const m = [f.nextMeetingAt, f.lastMeetingAt].filter((d): d is string => !!d && (!f.eventDate || d.slice(0, 10) >= f.eventDate)).sort().pop();
+    if (m) { out.set(key, `Meeting on ${m.slice(0, 10)} (HubSpot)`); continue; }
+    const n = (x.notes.get(f.contactId) ?? []).find((n) => MEETING_NOTE.test(n.note));
+    if (n && !out.has(key)) out.set(key, `Sheet note: "${n.note}"`);
+  }
+  return out;
+}
+function hwPopulation(facts: LeadFact[], q: URLSearchParams, today: string, x: HwExtra = { redacted: new Set(), notes: new Map() }) {
+  const { nf, rows: rows0 } = filtered(facts, q, today);
+  const meet = meetingAccounts(rows0, x);
+  const rows = rows0.filter((f) => !x.redacted.has(f.contactId) && !meet.has(f.companyId ?? `contact:${f.contactId}`));
   const part = q.get("part") ?? "";
   const pop = rows.filter((f) => (f.eligible || f.ineligibleReason === "No SDR assigned" || f.ineligibleReason === "SDR not on approved roster")
     && (!part || participationScope(f) === part)
@@ -596,8 +613,8 @@ function hwCounts(list: Array<{ cls: string; worked: boolean }>) {
     total: list.length, worked: list.filter((r) => r.worked).length, coverage: pct(list.filter((r) => r.worked).length, list.length) };
 }
 
-export function cmoHotWarm(facts: LeadFact[], q: URLSearchParams, today: string, rules: Rules) {
-  const { nf, pop, part } = hwPopulation(facts, q, today);
+export function cmoHotWarm(facts: LeadFact[], q: URLSearchParams, today: string, rules: Rules, x?: HwExtra) {
+  const { nf, pop, part } = hwPopulation(facts, q, today, x);
   const recs = hwRecords(pop);
   const contacts = hwContacts(recs);
   const evMeta = new Map<string, { name: string; date: string | null; category: string }>();
@@ -634,8 +651,8 @@ export function cmoHotWarm(facts: LeadFact[], q: URLSearchParams, today: string,
 }
 
 /** Records behind one CMO Hot/Warm cell. scope = all | event | sdr; metric = hot_total|hot_worked|hot_unworked|warm_*|unworked|total. */
-export function cmoHotWarmDrill(facts: LeadFact[], q: URLSearchParams, today: string, rules: Rules) {
-  const { nf, pop } = hwPopulation(facts, q, today);
+export function cmoHotWarmDrill(facts: LeadFact[], q: URLSearchParams, today: string, rules: Rules, x?: HwExtra) {
+  const { nf, pop } = hwPopulation(facts, q, today, x);
   const scope = q.get("scope") ?? "all", id = q.get("id") ?? "", metric = q.get("metric") ?? "total";
   const recs = hwRecords(pop);
   let list: Array<HwRec & { events?: string[] }> = scope === "event" ? recs.filter((r) => r.f.eventId === id) : hwContacts(recs);
@@ -657,6 +674,7 @@ export function cmoHotWarmDrill(facts: LeadFact[], q: URLSearchParams, today: st
       sdrName: f.sdrOwnerId ? rosterById.get(f.sdrOwnerId)?.name ?? f.sdrOwnerId : "Unassigned", cls: r.cls, evidence: r.evidence,
       companyIntent: lv, worked: r.worked, lastSdrOutreach: lastOwn,
       contactStatus: (f as any).contactLeadStatus ?? null,
+      sheetNotes: (x?.notes.get(f.contactId) ?? []).map((n) => `${n.note} (${n.tab})`),
       workedByOther: r.byOther ? { at: r.byOther.at, sameContact: r.byOther.sameContact, contactName: r.byOther.contactName,
         by: (() => { const o = ownerLabel(r.byOther!.ownerId, rules); return o ? `${o.name ?? o.id}${o.role ? ` (${o.role})` : ""}` : "another rep"; })() } : null,
       lastContacted: all.flatMap((x) => x.allTouchDates ?? []).sort().pop() ?? null,
