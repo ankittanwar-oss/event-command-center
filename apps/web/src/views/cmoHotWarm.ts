@@ -55,8 +55,8 @@ export async function hotWarmSection(route: Route): Promise<HTMLElement> {
   const A = d.all;
   const block = (n: number, label: string, tone: string, metric: string) => h("div", { class: `kblock ${tone}`, onclick: n ? drill("all", "", metric, "All events") : undefined }, h("div", { class: "kbn" }, fmt.n(n)), h("div", { class: "kbl" }, label));
   const snapshot = h("section", { class: "kgrid" },
-    block(A.hotTotal, "Total Hot", "hot", "hot_total"), block(A.hotWorked, "Hot worked", "hot", "hot_worked"), block(A.hotUnworked, "Hot unworked", "hot un", "hot_unworked"),
-    block(A.warmTotal, "Total Warm", "warm", "warm_total"), block(A.warmWorked, "Warm worked", "warm", "warm_worked"), block(A.warmUnworked, "Warm unworked", "warm un", "warm_unworked"));
+    block(A.hotTotal, "Total Hot", "tot hot", "hot_total"), block(A.hotWorked, "Hot worked", "ok", "hot_worked"), block(A.hotUnworked, "Hot unworked", "bad", "hot_unworked"),
+    block(A.warmTotal, "Total Warm", "tot warm", "warm_total"), block(A.warmWorked, "Warm worked", "ok", "warm_worked"), block(A.warmUnworked, "Warm unworked", "bad", "warm_unworked"));
 
   // ---- 2. Event summary: one clean row per event; click a row for the lead list.
   const pct = (v: number | null, n: number) => (n ? h("span", { class: `pc ${cls(v)}` }, `${Math.round(v ?? 0)}%`) : h("span", { class: "faint" }, "–"));

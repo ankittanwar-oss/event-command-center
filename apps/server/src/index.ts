@@ -4,13 +4,22 @@ import { errMessage, log } from "./log.js";
 import { migrate } from "./db/migrate.js";
 import { closePool } from "./db/pool.js";
 import { createApp } from "./api/server.js";
-import { runSync } from "./sync/sync.js";
+import { recomputeFacts, runSync } from "./sync/sync.js";
+import { getSetting, setSetting } from "./db/repo.js";
+import { BUILD } from "./api/server.js";
 import { invalidateSnapshot } from "./api/cache.js";
 
 async function main() {
   await migrate();
   const server = createApp();
   server.listen(env.port, "0.0.0.0", () => log.info("web service listening", { port: env.port, auth: !!env.appPassword, admin: !!env.adminToken }));
+  // New logic only reaches stored lead facts when they are recomputed. Do it once per new build, right after start-up,
+  // so a deploy takes effect immediately instead of waiting for the next scheduled sync.
+  (async () => {
+    if ((await getSetting("facts_build")) === BUILD) return;
+    const n = await recomputeFacts(); invalidateSnapshot(); await setSetting("facts_build", BUILD);
+    log.info("recomputed lead facts for new build", { build: BUILD, leads: n });
+  })().catch((e) => log.error("start-up recompute failed", { error: errMessage(e) }));
   // Scheduled refresh inside the web service (no separate worker needed). A Postgres advisory lock prevents
   // overlap with manual refreshes or a separate cron worker. Errors are logged; the last good data stays live.
   if (env.syncIntervalMinutes > 0) {

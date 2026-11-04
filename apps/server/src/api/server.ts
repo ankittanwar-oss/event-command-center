@@ -13,6 +13,8 @@ import { clearDisposition, loadDispositions, saveDisposition } from "./dispositi
 import { checkAppAuth, HttpError, readJson, requireAdmin, SECURITY_HEADERS, send } from "./http.js";
 import * as v from "./views.js";
 
+export const BUILD = "update-41";
+
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
   ".svg": "image/svg+xml", ".png": "image/png", ".ico": "image/x-icon", ".json": "application/json", ".woff2": "font/woff2",
@@ -44,7 +46,7 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL) {
     const t = s.asOf ?? today();
     return send(res, 200, {
       ...v.metaFor(s.facts, t), freshness: await freshness(), computedAt: s.computedAt, leadCount: s.facts.length,
-      portalId: env.hubspotPortalId, adminEnabled: !!env.adminToken, manualSyncRunning, build: "update-40",
+      portalId: env.hubspotPortalId, adminEnabled: !!env.adminToken, manualSyncRunning, build: BUILD,
     });
   }
 

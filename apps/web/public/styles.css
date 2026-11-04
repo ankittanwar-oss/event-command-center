@@ -729,3 +729,6 @@ details.moresec > summary { cursor: pointer; font-weight: 600; padding: 8px 0; o
 .lead.u{border-left:3px solid #b45309}
 
 .lead .byo{color:#15803d;font-size:13px;margin-top:3px}
+
+.kblock.tot.hot{background:#9a3412}.kblock.tot.warm{background:#b45309}
+.kblock.ok{background:#15803d}.kblock.bad{background:#b91c1c}
