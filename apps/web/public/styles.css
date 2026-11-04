@@ -727,3 +727,5 @@ details.moresec > summary { cursor: pointer; font-weight: 600; padding: 8px 0; o
 .lead .l1{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.lead .l1 .sp{flex:1}
 .lead .l2{font-size:13px;margin-top:3px;overflow-wrap:anywhere}
 .lead.u{border-left:3px solid #b45309}
+
+.lead .byo{color:#15803d;font-size:13px;margin-top:3px}

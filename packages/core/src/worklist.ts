@@ -538,6 +538,7 @@ export function contactWorklist(rows: LeadFact[], today: string, rules: Rules, d
       ...top.a, eventId: f.eventId,
       yourTouches, yourLastTouchAt, yourTouchesSinceAllocation: sinceAlloc, sdrTouchesAny: ids.size,
       otherSdrTouches: Math.max(0, ...leads.map((l) => l.otherSdrTouches ?? 0)), lastOtherSdrTouch: other,
+      otherRepTouch: leads.map((l) => l.otherRepTouch).filter((x): x is { at: string; ownerId: string | null } => !!x).sort((a, b) => b.at.localeCompare(a.at))[0] ?? null,
       lastOutboundAt: lastOut?.at ?? null, lastOutboundOwnerId: lastOut?.by ?? null, lastOutboundKind: lastOut?.kind ?? null,
       daysSinceTouch: ia.businessDays, nextTask: f.nextTaskDue ? { due: f.nextTaskDue, subject: f.nextTaskSubject ?? null, ownerId: f.nextTaskOwnerId ?? null } : null,
       sql: sqlD ? "yes" : "no", sqlNote: anyMissingSql ? "open deal has no Became Qualified to Buy Date" : null,
@@ -579,6 +580,8 @@ export function accountWorklist(items: CItem[], today?: string, rules?: Rules) {
   const accounts = [...by.entries()].map(([key, cs]) => {
     const worked = cs.filter((c) => c.yourTouches > 0);
     const isWorked = worked.length > 0;
+    // Another SDR/AE already doing outreach at this account (any contact, since the event): the account is being worked.
+    const orx = isWorked ? null : cs.filter((c: any) => c.otherRepTouch).map((c: any) => ({ ...c.otherRepTouch, contactName: c.contactName as string | null })).sort((a: any, b: any) => b.at.localeCompare(a.at))[0] ?? null;
     const lastSdr = cs.map((c) => c.yourLastTouchAt).filter(Boolean).sort().pop() ?? null;
     const accountDays = lastSdr && today && rules ? businessDaysBetween(toDate(lastSdr)!, today, rules.businessCalendar)
       : (() => { const v = worked.map((c) => c.daysSinceTouch).filter((x): x is number => x !== null && x !== undefined); return v.length ? Math.min(...v) : null; })();
@@ -588,6 +591,7 @@ export function accountWorklist(items: CItem[], today?: string, rules?: Rules) {
     if (has("respond")) bucket = "respond";
     else if (companyDisp) bucket = "paused";
     else if (has("qualified")) bucket = "qualified";
+    else if (orx) bucket = "progress";
     else if (!isWorked) bucket = has("first_outreach") ? "first_outreach" : has("review") ? "review" : has("low") ? "low"
       : cs.every((c) => c.group === "paused") ? "paused" : "progress";
     // ACCOUNT recency = the selected SDR's latest qualifying outreach to ANY contact (never the stalest contact).
@@ -605,7 +609,8 @@ export function accountWorklist(items: CItem[], today?: string, rules?: Rules) {
     // Account-level primary status (independent of individual contacts' recency).
     const bd = (n: number) => `${n} business day${n === 1 ? "" : "s"} ago`;
     let primary: { action: string; reason: string; color: ActionColor };
-    if (bucket === "respond" || bucket === "first_outreach" || bucket === "review" || bucket === "low" || bucket === "qualified") primary = { action: top.action, reason: top.reason, color: top.color };
+    if (orx && bucket === "progress") primary = { action: "Being worked by another rep", reason: `Outreach to ${orx.contactName ?? "a contact"} on ${orx.at.slice(0, 10)}`, color: "green" };
+    else if (bucket === "respond" || bucket === "first_outreach" || bucket === "review" || bucket === "low" || bucket === "qualified") primary = { action: top.action, reason: top.reason, color: top.color };
     else if (bucket === "paused") primary = { action: companyDisp ? "Paused company-wide" : "No routine outreach", reason: companyDisp?.reason ?? "Every worked contact is paused", color: "grey" };
     else if (daysSinceLast === null) primary = { action: top.action, reason: top.reason, color: top.color };
     else if (daysSinceLast < 7) primary = { action: "Recently contacted", reason: `Last account outreach ${bd(daysSinceLast)}`, color: "green" };
@@ -619,7 +624,7 @@ export function accountWorklist(items: CItem[], today?: string, rules?: Rules) {
     return {
       primary, opportunities, attendees, registeredOnly,
       bestContact: { contactId: best.contactId, name: best.contactName, title: best.jobTitle, engagement: best.engagement, label: (best as any).engagementLabel, strength: best.engagementStrength },
-      daysSinceLast, slaBreach: !isWorked && cs.some((c) => c.group === "first_outreach" && c.color === "red"),
+      workedByOther: orx, daysSinceLast, slaBreach: !isWorked && !orx && cs.some((c) => c.group === "first_outreach" && c.color === "red"),
       overdueCommitment: cs.some((c) => c.group === "respond" && c.color === "red"),
       key, companyId: cs[0]!.companyId, companyName: cs[0]!.companyName ?? cs[0]!.contactName, intent: cs[0]!.intent, sdrOwnerId: cs[0]!.sdrOwnerId, sdrName: cs[0]!.sdrName,
       bucket, worked: isWorked, top, contacts, companyDisposition: companyDisp,

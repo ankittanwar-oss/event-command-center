@@ -461,7 +461,7 @@ export function daily(facts: LeadFact[], q: URLSearchParams, today: string, rule
   const acctList = accountWorklist(contacts.items as any, today, rules);
   const accountsOut = { buckets: ACCOUNT_BUCKETS, summary: accountSummary(acctList), dispositionCodes: DISPOSITION_CODES,
     window: "Account worked = at least one qualifying outreach by the current SDR to an eligible event contact, since that contact's event date (including before a later allocation date). Other reps' outreach is shown, never credited.",
-    items: acctList.map((a) => ({ ...a, companyDispositionLabel: a.companyDisposition ? DISPOSITION_CODES[a.companyDisposition.code] : null })) };
+    items: acctList.map((a) => ({ ...a, workedByOther: a.workedByOther ? { ...a.workedByOther, by: ownerLabel(a.workedByOther.ownerId, rules) } : null, companyDispositionLabel: a.companyDisposition ? DISPOSITION_CODES[a.companyDisposition.code] : null })) };
   return { accountView: accountsOut, contacts, filters: nf, groups: DAILY_GROUPS, summary: summarise(accts), bySdr, accounts: accts.slice(0, 1500), total: accts.length,
     today, work: { sections: work.sections, counts: work.counts, total: work.items.length,
       items: work.items.slice(0, 2000).map((i) => ({ ...i, lastContact: { at: i.lastOutboundAt, by: ownerLabel(i.lastOutboundOwnerId, rules), sdrAt: i.currentSdrLastTouchAt, sdr: ownerLabel(i.sdrOwnerId, rules) } })) } };
@@ -537,10 +537,29 @@ function hwPopulation(facts: LeadFact[], q: URLSearchParams, today: string) {
     && (!part || participationScope(f) === part));
   return { nf, pop, part };
 }
-type HwRec = { f: LeadFact; cls: "hot" | "warm"; evidence: string; worked: boolean };
+type ByOther = { at: string; ownerId: string | null; contactName: string | null; sameContact: boolean } | null;
+type HwRec = { f: LeadFact; cls: "hot" | "warm"; evidence: string; worked: boolean; byOther: ByOther };
+/** Worked = the current SDR touched this contact since the event, OR another SDR/AE did outreach to this contact or to
+ *  any other contact at the same company since the event (the account is being worked, so it is not a gap). */
 function hwRecords(pop: LeadFact[]): HwRec[] {
+  const byCo = new Map<string, Array<{ at: string; ownerId: string | null; contactId: string; contactName: string | null }>>();
+  for (const f of pop) if (f.companyId && f.otherRepTouch) {
+    const l = byCo.get(f.companyId) ?? []; l.push({ ...f.otherRepTouch, contactId: f.contactId, contactName: f.contactName ?? null }); byCo.set(f.companyId, l);
+  }
   const out: HwRec[] = [];
-  for (const f of pop) { const c = leadHotWarm(f); if (c.cls) out.push({ f, cls: c.cls, evidence: c.evidence, worked: (f.currentSdrTouches ?? 0) > 0 }); }
+  for (const f of pop) {
+    const c = leadHotWarm(f); if (!c.cls) continue;
+    const own = (f.currentSdrTouches ?? 0) > 0;
+    let byOther: ByOther = null;
+    if (!own) {
+      if (f.otherRepTouch) byOther = { ...f.otherRepTouch, contactName: f.contactName ?? null, sameContact: true };
+      else if (f.companyId && f.eventDate) {
+        const t = (byCo.get(f.companyId) ?? []).filter((x) => x.contactId !== f.contactId && x.at.slice(0, 10) >= f.eventDate!).sort((a, b) => b.at.localeCompare(a.at))[0];
+        if (t) byOther = { at: t.at, ownerId: t.ownerId, contactName: t.contactName, sameContact: false };
+      }
+    }
+    out.push({ f, cls: c.cls, evidence: c.evidence, worked: own || !!byOther, byOther });
+  }
   return out;
 }
 /** Contact-level rollup across events: Hot if Hot anywhere, else Warm; worked if worked for any of those events. */
@@ -551,6 +570,7 @@ function hwContacts(recs: HwRec[]) {
     if (!cur) { by.set(r.f.contactId, { ...r, events: [r.f.eventId] }); continue; }
     cur.events.push(r.f.eventId);
     if (r.cls === "hot" && cur.cls !== "hot") { cur.cls = "hot"; cur.evidence = r.evidence; cur.f = r.f; }
+    if (!cur.worked && r.worked) cur.byOther = r.byOther;
     cur.worked = cur.worked || r.worked;
   }
   return [...by.values()];
@@ -595,7 +615,7 @@ export function cmoHotWarm(facts: LeadFact[], q: URLSearchParams, today: string,
     definitions: {
       hot: "Hot lead = a documented conversation with this person: a real reply (not auto-replies or calendar notices), a meeting, or a note our team logged on the contact around the event (e.g. a booth conversation).",
       warm: "Warm lead = attended the event: check-in / attended date in HubSpot, the roundtable sheet, or the organiser's attendee list uploaded by our team (conference attendee). Registration only, unknown attendance and no-shows are not Warm.",
-      worked: "Worked = at least one qualifying outreach (email, call, LinkedIn) by the contact's CURRENT SDR since that event. Earlier SDRs' outreach is shown in drill-downs, not credited.",
+      worked: "Worked = outreach since the event by the contact's current SDR, OR by another SDR/AE to this person or anyone else at the same company (the account is being worked). Those are labelled \"Worked by <name>\" in drill-downs.",
       company: "Hot/Warm LEADS are people. Hot/Warm/Surging ACCOUNTS are the company Account Intent Level in HubSpot. They are reported separately and one never sets the other: a Warm account can have no Warm leads, and a Cold account can have a Hot lead.",
     },
   };
@@ -625,6 +645,8 @@ export function cmoHotWarmDrill(facts: LeadFact[], q: URLSearchParams, today: st
       sdrName: f.sdrOwnerId ? rosterById.get(f.sdrOwnerId)?.name ?? f.sdrOwnerId : "Unassigned", cls: r.cls, evidence: r.evidence,
       companyIntent: lv, worked: r.worked, lastSdrOutreach: lastOwn,
       contactStatus: (f as any).contactLeadStatus ?? null,
+      workedByOther: r.byOther ? { at: r.byOther.at, sameContact: r.byOther.sameContact, contactName: r.byOther.contactName,
+        by: (() => { const o = ownerLabel(r.byOther!.ownerId, rules); return o ? `${o.name ?? o.id}${o.role ? ` (${o.role})` : ""}` : "another rep"; })() } : null,
       lastContacted: all.flatMap((x) => x.allTouchDates ?? []).sort().pop() ?? null,
       everWorked: all.some((x) => x.touchesSinceEligibility > 0 || (x.otherSdrTouches ?? 0) > 0), otherSdrTouches: Math.max(0, ...all.map((x) => x.otherSdrTouches ?? 0)),
       events: (scope === "event" ? [f] : all).map((x) => ({ id: x.eventId, name: x.eventName, date: x.eventDate, category: x.eventCategory, participation: participationScope(x), source: x.participationSource ?? null })),

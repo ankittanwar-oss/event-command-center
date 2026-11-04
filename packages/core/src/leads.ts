@@ -275,6 +275,9 @@ export function computeLeadFact(
   const others = touches.filter((t) => t.ownerId !== sdr && (!ev.date || day(t) >= ev.date));
   const otherSdrTouches = others.length;
   const lastOtherSdrTouch = others.length ? { at: others[others.length - 1]!.timestamp, ownerId: others[others.length - 1]!.ownerId } : null;
+  // Outreach on this contact by ANY other rep (other SDR or AE) since the event: email out, outbound call or meeting.
+  const otherRep = ev.date ? outbound.filter((a) => !!a.ownerId && a.ownerId !== sdr && toDate(a.timestamp)! >= ev.date!) : [];
+  const otherRepTouch = otherRep.length ? { at: otherRep[otherRep.length - 1]!.timestamp, ownerId: otherRep[otherRep.length - 1]!.ownerId ?? null } : null;
   const lastTouchOwnerId = sinceElig.length ? sinceElig[sinceElig.length - 1]!.ownerId : null;
   const mine = sdr ? touches.filter((t) => t.ownerId === sdr) : [];
   const currentSdrLastTouchAt = mine.length ? mine[mine.length - 1]!.timestamp : null;
@@ -360,7 +363,7 @@ export function computeLeadFact(
     businessDaysToFirstTouch: bizToFirst, businessDaysSinceEligibility: bizSinceElig,
     lastReplyAt, lastOutboundAt: lastOutbound?.timestamp ?? null, lastOutboundOwnerId: lastOutbound?.ownerId ?? null, lastOutboundKind: lastOutbound?.kind ?? null, lastMeetingAt,
     currentSdrTouchesSinceAllocation: sdr && allocationDate ? touches.filter((t) => t.ownerId === sdr && day(t) >= allocationDate).length : null,
-    currentSdrTouches, otherSdrTouches, lastOtherSdrTouch, lastTouchOwnerId, currentSdrLastTouchAt,
+    currentSdrTouches, otherSdrTouches, lastOtherSdrTouch, otherRepTouch, lastTouchOwnerId, currentSdrLastTouchAt,
     nextTaskSubject: nextTask?.subject ?? null, nextTaskOwnerId: nextTask?.ownerId ?? null, slaApplies: !noSla, contactLeadStatus: contact.leadStatus ?? null, contactScores: contact.scores ?? null,
     participation: participation.status, participationSource: participation.source, accountIntent: company?.intent === undefined ? undefined : company.intent,
     ownership: { previousSdrId: company?.previousSdrOwnerId ?? null, companySdrId: company?.sdrOwnerId ?? null, companyOwnerId: company?.hubspotOwnerId ?? null, contactOwnerId: contact.ownerId ?? null,

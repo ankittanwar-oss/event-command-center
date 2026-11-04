@@ -125,8 +125,9 @@ async function openDrill(f: any, part: string, scope: string, id: string, metric
       const det = h("details", { class: "evgrp" }, h("summary", null, h("b", null, g.name), h("span", { class: "faint" }, ` · ${g.items.length} leads · `), h("span", { class: un ? "unw" : "faint" }, `${un} not worked`)),
         g.items.sort((x, y) => Number(x.r.worked) - Number(y.r.worked)).map(({ r, e }) => h("div", { class: `lead ${r.worked ? "w" : "u"}` },
           h("div", { class: "l1" }, h("b", null, r.contactName), h("span", { class: `hwcls ${r.cls}` }, r.cls === "hot" ? "Hot" : "Warm"),
-            h("span", { class: `hwst ${r.worked ? "w" : "u"}` }, r.worked ? "Worked" : "Not worked"), h("span", { class: "sp" }), hsLink("contact", r.contactId)),
+            h("span", { class: `hwst ${r.worked ? "w" : "u"}` }, r.workedByOther ? `Worked by ${r.workedByOther.by}` : r.worked ? "Worked" : "Not worked"), h("span", { class: "sp" }), hsLink("contact", r.contactId)),
           h("div", { class: "l2" }, `${r.companyName ?? "No company"} · Account intent: ${r.companyIntent ?? "–"} · Status: ${nice(r.contactStatus)}`),
+          r.workedByOther ? h("div", { class: "l2 byo" }, r.workedByOther.sameContact ? `${r.workedByOther.by} reached out to this person on ${fmt.day(r.workedByOther.at)}` : `Account being worked: ${r.workedByOther.by} contacted ${r.workedByOther.contactName ?? "a colleague"} at this company on ${fmt.day(r.workedByOther.at)}`) : null,
           h("div", { class: "l2 faint" }, `${partOf(e)} · Last contacted: ${r.lastContacted ? fmt.day(r.lastContacted) : "Never"} · Owner: ${r.sdrName}`))));
       if (gl.length === 1 || i === 0) (det as HTMLDetailsElement).open = true;
       return det;

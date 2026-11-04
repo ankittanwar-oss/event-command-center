@@ -137,6 +137,8 @@ function nudge(a: any, c: any, b: Bucket): { text: string; tone: "urgent" | "sof
     return { text: `${n} replied ${fmt.day(c.lastReplyAt)} and appears to be waiting for your response.`, tone: "urgent" };
   }
   if (b === "handled") return { text: a.bucket === "qualified" ? "Qualified and with the AE." : `Paused: ${a.companyDisposition?.reason ?? c.disposition?.reason ?? "verified reason recorded"}.`, tone: "plain" };
+  if (a.workedByOther) { const w = a.workedByOther; const who = w.by ? `${w.by.name ?? "Another rep"}${w.by.role ? ` (${w.by.role})` : ""}` : "Another rep";
+    return { text: `Already being worked: ${who} reached out to ${w.contactName ?? "a contact"} here on ${fmt.day(w.at)}. Coordinate before adding outreach.`, tone: "plain" }; }
   if (b === "momentum") {
     const d = a.daysSinceLast;
     if (c.conversation) return { text: `There's an active conversation with ${n}. Might be worth checking where it stands.`, tone: "soft" };

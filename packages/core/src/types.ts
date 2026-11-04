@@ -250,6 +250,7 @@ export interface LeadFact {
   lastMeetingAt?: string | null;
   currentSdrTouches?: number | null;    // touches by the CURRENT SDR since the event date (other reps not credited)
   otherSdrTouches?: number;             // qualifying touches by OTHER roster SDRs since the event (context, never credited)
+  otherRepTouch?: { at: string; ownerId: string | null } | null; // latest outreach by another SDR/AE since the event
   lastOtherSdrTouch?: { at: string; ownerId: string | null } | null;
   lastTouchOwnerId?: string | null;
   currentSdrLastTouchAt?: string | null; // last qualifying touch by the CURRENT SDR (any date)
