@@ -209,6 +209,7 @@ async function syncAll(hs: HubSpotClient, rules: Rules, full: boolean, records: 
     .map((c) => c.id);
   records.companies_for_activity = activityCompanyIds.length;
   for (const type of ACTIVITY_TYPES) {
+   try {
     const byContact = await hs.associations("contacts", type, contactIds);
     const ids = new Set<string>();
     for (const [cid, list] of byContact) for (const id of list) { ids.add(id); contactLinks.push([`${type}:${id}`, cid]); if (type === "tasks") taskContactLinks.push([id, cid]); }
@@ -261,6 +262,11 @@ async function syncAll(hs: HubSpotClient, rules: Rules, full: boolean, records: 
       records.linkedin_messages_read = li;
       if (!li && full) warnings.push("No LinkedIn communications were found on event contacts. If SDRs log LinkedIn via Sales Navigator or an extension, confirm those records are associated with contacts.");
     }
+   } catch (e) {
+    // Notes are optional context (event-conversation evidence). If the private app lacks access, keep syncing the rest.
+    if (type !== "notes") throw e;
+    warnings.push(`Contact notes could not be read (${errMessage(e)}). Event-conversation evidence from notes is unavailable until the HubSpot app can read notes.`);
+   }
   }
   // activity ids in links must exist (FK); keep only links whose activity row was stored
   const storedActs = await existingIds(db, "activities", [...new Set([...contactLinks, ...companyLinks].map((l) => l[0]))]);

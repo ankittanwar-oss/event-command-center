@@ -365,6 +365,11 @@ export function computeLeadFact(
     participation: participation.status, participationSource: participation.source, accountIntent: company?.intent === undefined ? undefined : company.intent,
     ownership: { previousSdrId: company?.previousSdrOwnerId ?? null, companySdrId: company?.sdrOwnerId ?? null, companyOwnerId: company?.hubspotOwnerId ?? null, contactOwnerId: contact.ownerId ?? null,
       contactSdrId: contact.sdrOwnerId ?? null, companyCount: contact.companyIds?.length ?? (contact.companyId ? 1 : 0), allocationDate },
+    eventNote: (() => {
+      if (!ev.date) return null;
+      const n = contactActs.filter((a) => a.kind === "NOTE" && !!a.ownerId && !/usepylon\.com|^\s*\[(Slack|Email|Manual|Microsoft Teams|Teams|Chat)[^\]]*\]/i.test(a.title ?? "") && toDate(a.timestamp)! >= addDays(ev.date!, -1) && toDate(a.timestamp)! <= addDays(ev.date!, 14)).sort((x, y) => x.timestamp.localeCompare(y.timestamp))[0];
+      return n ? { at: n.timestamp, text: n.title, ownerId: n.ownerId } : null;
+    })(),
     nextMeetingAt: contactActs.filter((a) => a.kind === "MEETING" && toDate(a.timestamp)! > today).map((a) => a.timestamp).sort()[0] ?? null,
     firstTouchSlaMet: noSla ? null : slaMet, firstTouchOverdue: noSla ? false : overdue, expectedTouches: expected,
     insufficientFollowUp: insufficient, multiWeek: weeks.size >= rules.multiWeekMinWeeks,

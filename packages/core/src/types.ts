@@ -86,12 +86,12 @@ export interface EventContact {
   source?: "hubspot" | "sheet" | "both" | null;
 }
 
-export type ActivityKind = "EMAIL" | "INCOMING_EMAIL" | "CALL" | "MEETING" | "LINKEDIN" | "TASK" | "OTHER";
+export type ActivityKind = "EMAIL" | "INCOMING_EMAIL" | "CALL" | "MEETING" | "LINKEDIN" | "TASK" | "NOTE" | "OTHER";
 
 export interface Activity {
   id: string;                         // "<objectType>:<hubspot id>" so ids never collide across object types
   kind: ActivityKind;
-  objectType: "emails" | "calls" | "meetings" | "communications" | "tasks";
+  objectType: "emails" | "calls" | "meetings" | "communications" | "tasks" | "notes";
   timestamp: string;                  // ISO timestamp
   ownerId: string | null;
   direction: string | null;           // hs_email_direction / hs_call_direction
@@ -263,6 +263,8 @@ export interface LeadFact {
   participation?: "attended" | "registered_only" | "no_show" | "unknown";
   participationSource?: string | null;    // HubSpot contact Lead Status (structured disposition source)
   nextMeetingAt?: string | null;
+  /** A note logged on this contact around the event by a SpotDraft user (evidence of an event conversation). */
+  eventNote?: { at: string; text: string | null; ownerId: string | null } | null;
   /** Ownership as recorded on each record (for reconciliation; the SDR used everywhere is sdrOwnerId). */
   ownership?: { previousSdrId?: string | null; companySdrId: string | null; companyOwnerId: string | null; contactOwnerId: string | null; contactSdrId: string | null; companyCount: number; allocationDate: string | null };        // a scheduled meeting in the future (verified commitment)
   dataQuality: string[];

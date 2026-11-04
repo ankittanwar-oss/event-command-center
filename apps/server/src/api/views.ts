@@ -560,7 +560,8 @@ function hwCounts(list: Array<{ cls: string; worked: boolean }>) {
   const pct = (n: number, d: number) => (d ? Math.round((n / d) * 1000) / 10 : null);
   return { hotTotal: hot.length, hotWorked: hot.filter((r) => r.worked).length, hotCoverage: pct(hot.filter((r) => r.worked).length, hot.length),
     warmTotal: warm.length, warmWorked: warm.filter((r) => r.worked).length, warmCoverage: pct(warm.filter((r) => r.worked).length, warm.length),
-    hotUnworked: hot.filter((r) => !r.worked).length, warmUnworked: warm.filter((r) => !r.worked).length, unworked: list.filter((r) => !r.worked).length };
+    hotUnworked: hot.filter((r) => !r.worked).length, warmUnworked: warm.filter((r) => !r.worked).length, unworked: list.filter((r) => !r.worked).length,
+    total: list.length, worked: list.filter((r) => r.worked).length, coverage: pct(list.filter((r) => r.worked).length, list.length) };
 }
 
 export function cmoHotWarm(facts: LeadFact[], q: URLSearchParams, today: string, rules: Rules) {
@@ -592,10 +593,10 @@ export function cmoHotWarm(facts: LeadFact[], q: URLSearchParams, today: string,
     filters: nf, participation: part || "all", thresholds: rules.coverageColors ?? { green: 80, amber: 50 },
     all, events, sdrs, gaps,
     definitions: {
-      hot: "Hot = verified two-way engagement with this person: a real prospect reply (not auto-replies or calendar notices) or a meeting.",
-      warm: "Warm = verified attendance at the event: an attended date / check-in recorded in HubSpot or the roundtable sheet. Registration, list inclusion, unknown attendance and no-shows are not Warm.",
+      hot: "Hot lead = a documented conversation with this person: a real reply (not auto-replies or calendar notices), a meeting, or a note our team logged on the contact around the event (e.g. a booth conversation).",
+      warm: "Warm lead = attended the event: check-in / attended date in HubSpot, the roundtable sheet, or the organiser's attendee list uploaded by our team (conference attendee). Registration only, unknown attendance and no-shows are not Warm.",
       worked: "Worked = at least one qualifying outreach (email, call, LinkedIn) by the contact's CURRENT SDR since that event. Earlier SDRs' outreach is shown in drill-downs, not credited.",
-      company: "Company Account Intent (Hot/Warm/Surging) is shown separately and never makes a contact Hot or Warm.",
+      company: "Hot/Warm LEADS are people. Hot/Warm/Surging ACCOUNTS are the company Account Intent Level in HubSpot. They are reported separately and one never sets the other: a Warm account can have no Warm leads, and a Cold account can have a Hot lead.",
     },
   };
 }

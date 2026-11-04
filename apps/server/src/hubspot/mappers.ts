@@ -22,7 +22,7 @@ export const COMPANY_PROPERTIES = [
 export const COMPANY_LABELLED = ["account_type", "newtags___sdr", "tam_bucket", "icp_category_20", "unify_intent_level"] as const;
 export type LabelMaps = Record<string, Map<string, string>>;
 
-export const ACTIVITY_TYPES = ["emails", "calls", "meetings", "communications", "tasks"] as const;
+export const ACTIVITY_TYPES = ["emails", "calls", "meetings", "communications", "tasks", "notes"] as const;
 export type ActivityType = (typeof ACTIVITY_TYPES)[number];
 
 export const ACTIVITY_PROPERTIES: Record<ActivityType, string[]> = {
@@ -31,6 +31,8 @@ export const ACTIVITY_PROPERTIES: Record<ActivityType, string[]> = {
   meetings: ["hs_timestamp", "hs_meeting_start_time", "hubspot_owner_id", "hs_meeting_outcome", "hs_meeting_title"],
   communications: ["hs_timestamp", "hubspot_owner_id", "hs_communication_channel_type", "hs_communication_logged_from", "hs_body_preview"],
   tasks: ["hs_timestamp", "hubspot_owner_id", "hs_task_status", "hs_task_type", "hs_task_subject", "hs_task_completion_date"],
+  // Notes / comments logged on the contact (e.g. "spoke at the ACC booth"): evidence of an event conversation, never a touch.
+  notes: ["hs_timestamp", "hubspot_owner_id", "hs_note_body"],
 };
 
 export const DEAL_PROPERTIES_BASE = [
@@ -169,6 +171,11 @@ export function mapActivity(type: ActivityType, r: any): ActivityRow | null {
       channel = s(p.hs_communication_channel_type)?.toUpperCase() ?? null;
       kind = channel === "LINKEDIN_MESSAGE" || channel === "LINKEDIN" ? "LINKEDIN" : "OTHER";
       title = s(p.hs_body_preview)?.slice(0, 140) ?? null;
+      break;
+    }
+    case "notes": {
+      kind = "NOTE";
+      title = (s(p.hs_note_body) ?? "").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim().slice(0, 240) || null;
       break;
     }
     case "tasks": {

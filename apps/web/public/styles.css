@@ -706,3 +706,5 @@ details.moresec > summary { cursor: pointer; font-weight: 600; padding: 8px 0; o
 .hwst { font-size: 11px; font-weight: 700; } .hwst.w { color: #067647; } .hwst.u { color: #b54708; }
 @media (max-width: 980px) { .hwtable { font-size: 13px; } .hwtable th:first-child { width: 26%; } .hwc .bar { display: none; } }
 @media (prefers-color-scheme: dark) { .hwtable tr.hwtot td { background: #1f2227; } .cv-g { background: #0f3a24; color: #75e0a7; } .cv-a { background: #4a3510; color: #fec84b; } .cv-r { background: #4a1714; color: #fda29b; } .hwtable th { background: #16181c; } }
+.hwsplit { font-size: 11.5px; font-weight: 500; color: #667085; margin-top: 1px; } .hwsplit .link { color: inherit; }
+.hwtable th:first-child { width: 44%; } .hwc { font-size: 15px; }

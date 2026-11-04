@@ -395,8 +395,10 @@ export function engagementReason(f: LeadFact): { text: string; strength: number;
   if (reply) return mk(`Replied to SDR ${reply}`, 0);
   if (f.nextMeetingAt) return mk(`Meeting scheduled ${toDate(f.nextMeetingAt)}`, 0);
   if (/^Meeting on/.test(f.inPlayReason ?? "")) return mk((f.inPlayReason ?? "").replace("Meeting on", "Meeting"), 0);
+  // A note logged by our team around the event ("spoke at the booth") = a documented event conversation.
+  if (f.eventNote) return mk(`Spoke with us at ${f.eventName.split(/[|:]/)[0]!.trim().slice(0, 40)} (note ${toDate(f.eventNote.at)}${f.eventNote.text ? `: "${f.eventNote.text.slice(0, 80)}${f.eventNote.text.length > 80 ? "…" : ""}"` : ""})`, 0);
   const ev = f.eventName.split(/[|:]/)[0]!.trim().slice(0, 40);
-  if (p === "attended") return f.eventCategory === "sponsored" ? mk(`Attended ${ev} (conference; SpotDraft engagement unverified)`, 2) : mk(`Verified attendee: ${ev}`, 1);
+  if (p === "attended") return f.eventCategory === "sponsored" ? mk(`Conference attendee: ${ev} (organiser list)`, 2) : mk(`Verified attendee: ${ev}`, 1);
   if (p === "no_show") return mk(`Registered for ${ev}; confirmed no-show`, 4);
   if (p === "registered_only") return mk(`Registered for ${ev}; no attendance record`, 3);
   return mk(`Registered for ${ev}; attendance unknown`, 3);
@@ -693,7 +695,7 @@ export function leadHotWarm(f: LeadFact): { cls: HotWarm; evidence: string } {
   const e = engagementReason(f);
   if (e.strength === 0) return { cls: "hot", evidence: e.text };
   const p = f.participation ?? (f.attendance === "attended" ? "attended" : "unknown");
-  if (p === "attended") return { cls: "warm", evidence: `${f.eventCategory === "sponsored" ? "Attended conference (attended date recorded)" : "Verified attendee"}: ${f.eventName}` };
+  if (p === "attended") return { cls: "warm", evidence: `${f.eventCategory === "sponsored" ? "Conference attendee (organiser attendee list uploaded to HubSpot)" : "Verified attendee"}: ${f.eventName}` };
   return { cls: null, evidence: e.text };
 }
 /** Participation scope used by the CMO filter (same statuses as the Daily Command Centre). */

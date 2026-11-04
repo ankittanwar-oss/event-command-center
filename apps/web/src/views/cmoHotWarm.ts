@@ -7,11 +7,11 @@ import { fmt, h, hsLink } from "../ui.js";
 // number opens /api/cmo-hotwarm-drill with the same filters, so the list always matches the count.
 
 const PART_LABEL: Record<string, string> = { "": "All eligible contacts", attended: "Verified attendees", registered: "Registered only", unknown: "Attendance unknown", sponsored_list: "Sponsored-event list only" };
-const PSTAT: Record<string, string> = { attended: "Verified attendee", registered: "Registered only", unknown: "Attendance unknown", sponsored_list: "On sponsored-event list (not verified)", no_show: "Confirmed no-show" };
+const PSTAT: Record<string, string> = { attended: "Attended (check-in or organiser list)", registered: "Registered only", unknown: "Attendance unknown", sponsored_list: "On sponsored-event list (not verified)", no_show: "Confirmed no-show" };
 const METRIC_LABEL: Record<string, string> = {
   hot_total: "Hot contacts", hot_worked: "Hot contacts worked", hot_unworked: "Unworked Hot contacts", hot_cov: "Hot contacts (worked and unworked)",
   warm_total: "Warm contacts", warm_worked: "Warm contacts worked", warm_unworked: "Unworked Warm contacts", warm_cov: "Warm contacts (worked and unworked)",
-  unworked: "Unworked Hot/Warm contacts", total: "Hot/Warm contacts",
+  unworked: "Unworked Hot/Warm contacts", total: "Hot/Warm leads",
 };
 
 export async function hotWarmSection(route: Route): Promise<HTMLElement> {
@@ -25,33 +25,36 @@ export async function hotWarmSection(route: Route): Promise<HTMLElement> {
 
   const num = (n: number, scope: string, id: string, metric: string, name: string) =>
     h("td", { class: "n hwn" }, n ? h("span", { class: "link", onclick: drill(scope, id, metric, name) }, fmt.n(n)) : h("span", { class: "faint" }, "0"));
-  const cov = (v: number | null, total: number, scope: string, id: string, metric: string, name: string) =>
-    h("td", { class: `n hwc ${cls(total ? v : null)}`, title: total ? "Click for the full population, worked and unworked" : "No contacts: not measurable" },
-      total ? h("span", { class: "link", onclick: drill(scope, id, metric, name) }, h("span", { class: "bar" }, h("i", { style: `width:${Math.min(100, v ?? 0)}%` })), `${Math.round(v ?? 0)}%`) : "N/A");
+  // Simple executive row: Leads (Hot · Warm on hover/click) · Worked · Unworked · Coverage (the only coloured cell).
+  const leads = (r: any, scope: string, id: string, name: string) => h("td", { class: "n hwn", title: `${r.hotTotal} Hot · ${r.warmTotal} Warm` },
+    r.total ? [h("span", { class: "link", onclick: drill(scope, id, "total", name) }, fmt.n(r.total)),
+      h("div", { class: "hwsplit" }, h("span", { class: "link", onclick: drill(scope, id, "hot_total", name) }, `${r.hotTotal} Hot`), " · ", h("span", { class: "link", onclick: drill(scope, id, "warm_total", name) }, `${r.warmTotal} Warm`))] : h("span", { class: "faint" }, "0"));
+  const cov = (r: any, scope: string, id: string, name: string) =>
+    h("td", { class: `n hwc ${cls(r.total ? r.coverage : null)}`, title: r.total ? `Hot ${r.hotCoverage ?? "N/A"}% · Warm ${r.warmCoverage ?? "N/A"}%` : "No leads: not measurable" },
+      r.total ? h("span", { class: "link", onclick: drill(scope, id, "cov", name) }, `${Math.round(r.coverage ?? 0)}%`) : "N/A");
   const row = (r: any, scope: string, id: string, name: any, label: string, total = false) => h("tr", { class: total ? "hwtot" : "" },
-    h("td", { class: "hwname" }, name),
-    num(r.hotTotal, scope, id, "hot_total", label), num(r.hotWorked, scope, id, "hot_worked", label), cov(r.hotCoverage, r.hotTotal, scope, id, "hot_cov", label),
-    num(r.warmTotal, scope, id, "warm_total", label), num(r.warmWorked, scope, id, "warm_worked", label), cov(r.warmCoverage, r.warmTotal, scope, id, "warm_cov", label),
-    num(r.unworked, scope, id, "unworked", label));
-  const head = (first: string) => h("thead", null, h("tr", null, h("th", null, first), ...["Hot total", "Hot worked", "Hot coverage", "Warm total", "Warm worked", "Warm coverage", "Total unworked"].map((x) => h("th", { class: "n" }, x))));
+    h("td", { class: "hwname" }, name), leads(r, scope, id, label), num(r.worked, scope, id, "worked", label), num(r.unworked, scope, id, "unworked", label), cov(r, scope, id, label));
+  const head = (first: string) => h("thead", null, h("tr", null, h("th", null, first),
+    h("th", { class: "n", title: "People with a documented conversation (Hot) or who attended (Warm). Not the company's intent." }, "Hot/Warm leads"),
+    h("th", { class: "n" }, "Worked"), h("th", { class: "n" }, "Unworked"), h("th", { class: "n" }, "Coverage")));
 
   // ---- event table (ALL EVENTS pinned; default sort: most unworked Hot, then Warm)
   const esort = route.extra.get("esort") ?? "gap";
   const evs: any[] = [...d.events];
-  const lowCov = (e: any) => Math.min(e.hotTotal ? e.hotCoverage : 101, e.warmTotal ? e.warmCoverage : 101);
+  const lowCov = (e: any) => (e.total ? e.coverage : 101);
   evs.sort((a, b) => esort === "date" ? (b.date ?? "").localeCompare(a.date ?? "")
     : esort === "hot" ? b.hotTotal - a.hotTotal : esort === "warm" ? b.warmTotal - a.warmTotal
     : esort === "hotcov" ? (a.hotTotal ? a.hotCoverage : 101) - (b.hotTotal ? b.hotCoverage : 101)
     : esort === "warmcov" ? (a.warmTotal ? a.warmCoverage : 101) - (b.warmTotal ? b.warmCoverage : 101)
     : esort === "unworked" ? b.unworked - a.unworked : esort === "lowest" ? lowCov(a) - lowCov(b)
-    : b.hotUnworked - a.hotUnworked || b.warmUnworked - a.warmUnworked || b.unworked - a.unworked);
+    : b.unworked - a.unworked || b.hotUnworked - a.hotUnworked);
   const sel = (key: string, cur: string, opts: Array<[string, string]>) => h("select", { class: "hwsel", onchange: (e: Event) => go({ [key]: (e.target as HTMLSelectElement).value }) },
     opts.map(([v, l]) => { const o = h("option", { value: v }, l) as HTMLOptionElement; if (v === cur) o.selected = true; return o; }));
   const legend = h("div", { class: "hwlegend" }, h("span", { class: "sw cv-g" }), ` ${T.green}%+ worked `, h("span", { class: "sw cv-a" }), ` ${T.amber}–${T.green - 1}% `, h("span", { class: "sw cv-r" }), ` below ${T.amber}% `, h("span", { class: "sw cv-na" }), " not measurable");
   const eventTable = h("section", { class: "card hwcard" },
-    h("div", { class: "hwh" }, h("div", null, h("h2", null, "Hot & Warm Event Lead Coverage"), h("div", { class: "hwsub" }, "Are we working the high-priority people coming through our events?")),
+    h("div", { class: "hwh" }, h("div", null, h("h2", null, "Hot & Warm Event Leads"), h("div", { class: "hwsub" }, "People, not accounts: are we working the high-priority people from our events?")),
       h("div", { class: "hwctl" }, sel("part", part, Object.entries(PART_LABEL) as Array<[string, string]>),
-        sel("esort", esort, [["gap", "Sort: most unworked Hot, then Warm"], ["unworked", "Total unworked"], ["lowest", "Lowest coverage"], ["hotcov", "Hot coverage (low first)"], ["warmcov", "Warm coverage (low first)"], ["hot", "Hot total"], ["warm", "Warm total"], ["date", "Event date (newest)"]]))),
+        sel("esort", esort, [["gap", "Sort: most unworked"], ["lowest", "Lowest coverage"], ["hot", "Most Hot leads"], ["warm", "Most Warm leads"], ["date", "Event date (newest)"]]))),
     h("div", { class: "tbl-wrap" }, h("table", { class: "hwtable" }, head("Event"),
       h("tbody", null,
         row(d.all, "all", "", h("span", { title: "Event rows may overlap because one contact can engage with multiple events. ALL EVENTS counts unique contacts." }, "ALL EVENTS ", h("span", { class: "faint" }, "ⓘ unique contacts")), "All events", true),
@@ -61,10 +64,10 @@ export async function hotWarmSection(route: Route): Promise<HTMLElement> {
   // ---- SDR table (ALL SDRs pinned; current Company SDR Owner)
   const ssort = route.extra.get("ssort") ?? "gap";
   const sdrs: any[] = [...d.sdrs];
-  sdrs.sort((a, b) => ssort === "cov" ? lowCov(a) - lowCov(b) : b.hotUnworked - a.hotUnworked || b.warmUnworked - a.warmUnworked);
+  sdrs.sort((a, b) => ssort === "cov" ? lowCov(a) - lowCov(b) : b.unworked - a.unworked || b.hotUnworked - a.hotUnworked);
   const sdrTable = h("section", { class: "card hwcard" },
     h("div", { class: "hwh" }, h("div", null, h("h2", null, "Hot & Warm Coverage by SDR"), h("div", { class: "hwsub" }, "Are we following up with the high-priority leads assigned to each SDR?")),
-      h("div", { class: "hwctl" }, sel("ssort", ssort, [["gap", "Sort: most unworked Hot, then Warm"], ["cov", "Lowest coverage"]]))),
+      h("div", { class: "hwctl" }, sel("ssort", ssort, [["gap", "Sort: most unworked"], ["cov", "Lowest coverage"]]))),
     h("div", { class: "tbl-wrap" }, h("table", { class: "hwtable" }, head("SDR (current HubSpot owner)"),
       h("tbody", null, row(d.all, "all", "", "ALL SDRs", "All SDRs", true), sdrs.map((s) => row(s, "sdr", s.ownerId, s.name, s.name))))),
     h("div", { class: "hwfoot" }, legend, h("div", { class: "faint" }, "Owner = current Company SDR Owner in HubSpot. Worked = outreach by that current SDR; earlier owners' outreach is visible in the drill-down but not credited.")));

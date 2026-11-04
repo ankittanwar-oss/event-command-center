@@ -39,7 +39,7 @@ function intentInfo(it: any): { text: string; cls: string } {
 
 /** Participation wording; sponsored conferences never read as SpotDraft engagement. */
 function partText(e: any): string {
-  if (e.participation === "attended") return e.category === "sponsored" ? "Attended conference (SpotDraft interaction not verified)" : "Attended";
+  if (e.participation === "attended") return e.category === "sponsored" ? "Conference attendee (organiser list)" : "Attended";
   if (e.participation === "no_show") return "Confirmed no-show";
   if (e.category === "sponsored") return "On conference list · attendance not verified";
   if (e.participation === "registered_only") return "Registered only";
@@ -101,7 +101,7 @@ function whyLine(a: any, c: any): string {
   if (q === "qualified") return c.reason;
   const e = strongestEvent(c);
   const sig = c.engagementStrength === 0 ? c.engagement.toLowerCase()
-    : e?.participation === "attended" ? (e.category === "sponsored" ? `${short(e.name)} attendee (not verified with SpotDraft)` : `verified ${short(e.name)} attendee`)
+    : e?.participation === "attended" ? (e.category === "sponsored" ? `${short(e.name)} conference attendee` : `verified ${short(e.name)} attendee`)
     : e ? `registered for ${short(e.name)}; attendance not verified` : "no contact-level engagement";
   const work = q === "first" ? (c.color === "red" ? "first-touch SLA passed" : "no outreach yet") : a.daysSinceLast !== null && a.daysSinceLast !== undefined ? `last contacted ${a.daysSinceLast} business days ago` : "";
   return [intent, sig, work].filter(Boolean).join(" + ").replace(/^./, (x) => x.toUpperCase());
@@ -147,7 +147,7 @@ function nudge(a: any, c: any, b: Bucket): { text: string; tone: "urgent" | "sof
   if (engaged >= 2) return { text: `Interesting signal: ${engaged} people from this account engaged with SpotDraft events.`, tone: "soft" };
   if (c.engagementStrength === 0) return { text: `Worth a look: ${c.engagement}.`, tone: "soft" };
   if (e?.participation === "attended" && e.category !== "sponsored") return { text: `Worth a look: ${n} attended ${ev} and hasn't been contacted yet.`, tone: "soft" };
-  if (e?.participation === "attended") return { text: `${n} attended ${ev} (conference). No verified interaction with SpotDraft there.`, tone: "plain" };
+  if (e?.participation === "attended") return { text: `${n} attended ${ev} (organiser's attendee list). No conversation with us recorded yet.`, tone: "soft" };
   if (it.cls === "hot" || it.cls === "warm") return { text: `${it.text} account, but ${n}'s attendance at ${ev || "the event"} isn't verified. Worth checking the event context.`, tone: "plain" };
   if (e?.category === "sponsored") return { text: `On the ${ev} list. Attendance isn't verified.`, tone: "plain" };
   return { text: e ? `Registered for ${ev}. No attendance or reply recorded.` : "No verified engagement recorded yet.", tone: "plain" };

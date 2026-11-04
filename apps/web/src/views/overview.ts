@@ -315,7 +315,7 @@ export async function overviewView(route: Route): Promise<HTMLElement> {
     h("h2", null, "Where leadership should focus", h("span", { class: "sub" }, "Verified gaps, ordered by severity, temperature and volume · click to see the records")),
     focus,
     dealLine,
-    h("h2", null, "Hot vs Warm follow-up", h("span", { class: "sub" }, "Coverage, overdue and engagement health by lead temperature")),
+    h("h2", null, "By company event label (Hot vs Warm ACCOUNTS)", h("span", { class: "sub" }, "Uses the company property \"Event Leads - Cold/Warm/Surging/Hot\", not the people-level Hot/Warm leads above")),
     h("div", { class: "grid2" }, tempCol(d.hot), tempCol(d.warm)),
     h("h2", null, "SDR performance", h("span", { class: "sub" }, "Coverage, depth and consistency side by side; never blended into one score · full touch-depth view in SDR execution")),
     h("div", { class: "card" }, table(sdrCols, d.sdrs, { initialSort: "crit", rowClass: (r) => (sr(r.ownerId).health === "critical" ? "row-crit" : sr(r.ownerId).health === "at_risk" ? "row-warn" : "") })),

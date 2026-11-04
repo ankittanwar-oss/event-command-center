@@ -154,10 +154,10 @@ describe("contact worklist", () => {
     const a = contactAction(computeLeadFacts(dataset({ deals: [deal({ isClosed: true, isWon: false, sqlDate: "2025-03-01", closeDate: "2025-06-01" } as any)] }), R, T)[0]!, T, R);
     assert.equal(a.group, "first_outreach");
   });
-  test("sponsored attendance is not verified engagement", async () => {
+  test("sponsored attendance is labelled as conference attendance (organiser list)", async () => {
     const { engagementReason } = await import("../src/index.js");
     const f = computeLeadFacts(dataset({ events: [event({ category: "sponsored", name: "ACC EVENT 2026" })], links: [["e1", "c1", "2026-10-01"]] }), R, T)[0]!;
-    assert.match(engagementReason(f).text, /unverified/);
+    assert.match(engagementReason(f).text, /Conference attendee.*organiser list/);
   });
   test("zero touches with no SLA deadline is grey, not red", async () => {
     const { contactAction } = await import("../src/index.js");
@@ -386,4 +386,15 @@ test("CMO contact Hot/Warm: Warm company + registration-only contact is neither;
   assert.equal(leadHotWarm(fs.r!).cls, null); assert.equal(participationScope(fs.r!), "registered");
   assert.equal(leadHotWarm(fs.a!).cls, "warm");
   assert.equal(leadHotWarm(fs.m!).cls, "hot");
+});
+
+test("a note logged by our team around the event makes the person a Hot lead; conference attendee from organiser list is Warm", async () => {
+  const { leadHotWarm } = await import("../src/index.js");
+  const NOV = "2026-11-04";
+  const spoke = computeLeadFacts(dataset({ events: [event({ date: "2026-10-04", category: "sponsored", name: "ACC EVENT 2026" })], links: [["e1", "c1", "2026-10-05"]],
+    acts: [act({ ts: "2026-10-05T15:00:00Z", kind: "NOTE", objectType: "notes" as any, direction: null, title: "Spoke at booth, interested in CLM for procurement" })] }), R, NOV)[0]!;
+  assert.equal(leadHotWarm(spoke).cls, "hot"); assert.match(leadHotWarm(spoke).evidence, /Spoke with us at ACC/);
+  assert.equal(spoke.touchesSinceEligibility, 0); // a note is evidence, never an outreach touch
+  const list = computeLeadFacts(dataset({ events: [event({ date: "2026-10-04", category: "sponsored", name: "ACC EVENT 2026" })], links: [["e1", "c1", "2026-10-05"]] }), R, NOV)[0]!;
+  assert.equal(leadHotWarm(list).cls, "warm");
 });
