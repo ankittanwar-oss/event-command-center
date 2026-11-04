@@ -708,3 +708,14 @@ details.moresec > summary { cursor: pointer; font-weight: 600; padding: 8px 0; o
 @media (prefers-color-scheme: dark) { .hwtable tr.hwtot td { background: #1f2227; } .cv-g { background: #0f3a24; color: #75e0a7; } .cv-a { background: #4a3510; color: #fec84b; } .cv-r { background: #4a1714; color: #fda29b; } .hwtable th { background: #16181c; } }
 .hwsplit { font-size: 11.5px; font-weight: 500; color: #667085; margin-top: 1px; } .hwsplit .link { color: inherit; }
 .hwtable th:first-child { width: 44%; } .hwc { font-size: 15px; }
+
+.kgrid{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin:0 0 16px}
+@media(max-width:900px){.kgrid{grid-template-columns:repeat(3,1fr)}}
+.kblock{border-radius:12px;padding:18px 16px;color:#fff}
+.kblock.hot{background:#c2410c}.kblock.hot.un{background:#7c2d12}
+.kblock.warm{background:#b45309}.kblock.warm.un{background:#78350f}
+.kbn{font-size:34px;font-weight:700;line-height:1}.kbl{font-size:13px;margin-top:6px;opacity:.9}
+.hwtable.simple td,.hwtable.simple th{padding:10px 12px}.hwtable.simple th:first-child{width:auto}
+.clickrow{cursor:pointer}.clickrow:hover{background:rgba(0,0,0,.04)}
+.pc{font-weight:600}.n.b{font-weight:700}
+.hwtable.drill td{font-size:13px;vertical-align:top}

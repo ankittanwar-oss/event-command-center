@@ -624,6 +624,8 @@ export function cmoHotWarmDrill(facts: LeadFact[], q: URLSearchParams, today: st
       contactId: f.contactId, contactName: f.contactName, jobTitle: f.jobTitle, companyId: f.companyId, companyName: f.companyName,
       sdrName: f.sdrOwnerId ? rosterById.get(f.sdrOwnerId)?.name ?? f.sdrOwnerId : "Unassigned", cls: r.cls, evidence: r.evidence,
       companyIntent: lv, worked: r.worked, lastSdrOutreach: lastOwn,
+      contactStatus: (f as any).contactLeadStatus ?? null,
+      lastContacted: all.flatMap((x) => x.allTouchDates ?? []).sort().pop() ?? null,
       everWorked: all.some((x) => x.touchesSinceEligibility > 0 || (x.otherSdrTouches ?? 0) > 0), otherSdrTouches: Math.max(0, ...all.map((x) => x.otherSdrTouches ?? 0)),
       events: (scope === "event" ? [f] : all).map((x) => ({ id: x.eventId, name: x.eventName, date: x.eventDate, category: x.eventCategory, participation: participationScope(x), source: x.participationSource ?? null })),
     };
