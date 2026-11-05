@@ -755,3 +755,7 @@ details.moresec > summary { cursor: pointer; font-weight: 600; padding: 8px 0; o
 .mbar{display:flex;align-items:center;gap:8px;margin:4px 0 10px}
 .msub{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin:12px 0 6px}
 .msub.due{color:#92400e}.msub.none{color:#374151}.msub.later{color:#6b7280}
+
+.spsig>summary{cursor:pointer;padding:4px 0}.hwcls.signal{background:#f3f4f6;color:#4b5563}
+.lead .bd{font-size:12.5px;color:#4b5563}.lead .bd summary{cursor:pointer}.lead .bd ul{margin:4px 0 0 16px;padding:0}
+.scorebd{margin:0;padding-left:18px;font-size:13px}

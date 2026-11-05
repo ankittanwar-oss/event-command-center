@@ -6,7 +6,8 @@ export const CONTACT_PROPERTIES = [
   "firstname", "lastname", "email", "jobtitle", "country", "associatedcompanyid", "lifecyclestage", "hs_lead_status",
   "dnc", "hs_email_optout", "date_engaged__event_attended_date_", "hubspot_owner_id", "sdr_from_company",
   // Contact-level engagement signals (kept separate from company Account Intent Level)
-  "event_attendance_score", "event_registration_score", "contact_engagement_score", "heyreach_intent", "date_engaged__event_registration_date_",
+  "event_attendance_score", "event_registration_score", "contact_engagement_score", "heyreach_intent",
+  "email_click_score", "email_reply_score", "website_visit_score", "linkedin_ad_score", "google_ad_score", "blog__newsletter_score", "date_engaged__event_registration_date_",
 ];
 
 export const COMPANY_PROPERTIES = [
@@ -125,7 +126,8 @@ export function mapContact(r: any): ContactRow {
     do_not_contact: truthy(p.dnc), attended_date: hsDate(p.date_engaged__event_attended_date_),
     hubspot_owner_id: s(p.hubspot_owner_id), contact_sdr_owner_id: s(p.sdr_from_company),
     scores: { attendance: num(p.event_attendance_score), registration: num(p.event_registration_score), engagement: num(p.contact_engagement_score),
-      heyreachIntent: s(p.heyreach_intent), registeredDate: hsDate(p.date_engaged__event_registration_date_) },
+      heyreachIntent: s(p.heyreach_intent), registeredDate: hsDate(p.date_engaged__event_registration_date_),
+      emailClick: num(p.email_click_score), emailReply: num(p.email_reply_score), websiteVisit: num(p.website_visit_score), linkedinAd: num(p.linkedin_ad_score), googleAd: num(p.google_ad_score), newsletter: num(p.blog__newsletter_score) },
   };
 }
 

@@ -108,12 +108,13 @@ function whyLine(a: any, c: any): string {
 }
 
 // ---- Opportunity buckets (one per account, deterministic precedence) -------------------------------------------------
-type Bucket = "pickup" | "fresh" | "momentum" | "radar" | "handled";
+type Bucket = "pickup" | "fresh" | "sponsored" | "momentum" | "radar" | "handled";
 const BUCKETS2: Array<{ key: Bucket; label: string; desc: string }> = [
   { key: "pickup", label: "Conversations to pick up", desc: "A prospect replied in your thread, or a HubSpot task or commitment is due." },
-  { key: "fresh", label: "Fresh opportunities", desc: "Not contacted yet, with a verified signal: attended a SpotDraft event, replied, or a Hot/Surging account." },
+  { key: "fresh", label: "Hot & Warm opportunities", desc: "Not contacted yet. Attended a SpotDraft-hosted event, showed direct intent, or a sponsored-event contact with additional verified engagement." },
+  { key: "sponsored", label: "Sponsored event opportunities", desc: "Not contacted yet. Attended or spoke with us at a sponsored conference (ACC, RLLB, CLOC…), without enough other intent to be Warm." },
   { key: "momentum", label: "Contacted · re-engage", desc: "Already contacted since the event (by you or a colleague). You choose when to re-engage; nothing is scheduled for you." },
-  { key: "radar", label: "On your radar", desc: "Weaker or unverified signals: registered only, conference lists, intent without engagement, or data to check." },
+  { key: "radar", label: "Early signals · worth exploring", desc: "Registration only, organiser lists, unverified attendance, or data to check." },
   { key: "handled", label: "Already handled", desc: "Qualified / handed off to the AE, or paused for a verified reason." },
 ];
 /** Precedence: verified pickup > handled (SQL / paused) > worked > verified fresh signal > everything else (radar). */
@@ -122,8 +123,11 @@ function bucketOf(a: any, c: any): Bucket {
   if (a.bucket === "qualified" || a.bucket === "paused") return "handled";
   if (a.worked || a.workedByOther) return "momentum";
   if (a.bucket === "review" || a.bucket === "low") return "radar";
+  // Contact engagement decides the level, never the company's intent (Account Intent is shown separately on the card).
   const strongest = Math.min(...a.contacts.map((x: any) => x.engagementStrength ?? 4));
-  return strongest <= 1 || a.intent?.level === "hot" || (strongest === 2 && a.intent?.level === "warm") || c?.color === "red" ? "fresh" : "radar";
+  if (strongest <= 1 || c?.color === "red") return "fresh";
+  if (strongest === 2) return "sponsored";
+  return "radar";
 }
 /** Conversational, evidence-backed nudge. Direct and precise for genuine replies / tasks; neutral when evidence is thin. */
 function nudge(a: any, c: any, b: Bucket): { text: string; tone: "urgent" | "soft" | "plain" } {
@@ -148,6 +152,7 @@ function nudge(a: any, c: any, b: Bucket): { text: string; tone: "urgent" | "sof
   }
   if (engaged >= 2) return { text: `Interesting signal: ${engaged} people from this account engaged with SpotDraft events.`, tone: "soft" };
   if (c.engagementStrength === 0) return { text: `Worth a look: ${c.engagement}.`, tone: "soft" };
+  if (c.bestEventCategory === "sponsored" && c.engagementStrength <= 2) return { text: c.engagement, tone: c.engagementStrength === 1 ? "soft" : "plain" };
   if (e?.participation === "attended" && e.category !== "sponsored") return { text: `Worth a look: ${n} attended ${ev} and hasn't been contacted yet.`, tone: "soft" };
   if (e?.participation === "attended") return { text: `${n} attended ${ev} (organiser's attendee list). No conversation with us recorded yet.`, tone: "soft" };
   if (it.cls === "hot" || it.cls === "warm") return { text: `${it.text} account, but ${n}'s attendance at ${ev || "the event"} isn't verified. Worth checking the event context.`, tone: "plain" };
@@ -273,7 +278,7 @@ export async function dailyView(route: Route, meta: any): Promise<HTMLElement> {
       sel("ev", evF, [["", "Any event"], ...[...evs.entries()].sort((p1, p2) => p1[1].localeCompare(p2[1]))]),
       sel("cat", cat, [["", "Any event type"], ["owned", "Beacon / owned events"], ["webinar", "Webinars"], ["roundtable", "Roundtables"], ["sponsored", "Sponsored conferences"]]),
       sel("intent", intentF, [["", "Any account intent"], ["hotwarm", "Hot + Warm"], ["hot", "Hot / Surging"], ["warm", "Warm"], ["cold", "Cold"], ["unknown", "Not set"]]),
-      sel("eng", engF, [["", "Any contact engagement"], ["0", "Replied / meeting"], ["1", "Verified attendee"], ["2", "Conference attendee"], ["3", "Registered only"], ["4", "Company intent only"]]),
+      sel("eng", engF, [["", "Any contact engagement"], ["0", "Replied / meeting"], ["1", "Verified attendee"], ["2", "Sponsored event signal"], ["3", "Registered only"], ["4", "Company intent only"]]),
       sel("icp", icpF, [["", "Any ICP tier"], ...[...icps].sort().map((v) => [v, v] as [string, string])]),
       sel("work", workF, [["", "Contacted or not"], ["worked", "Already contacted"], ["unworked", "Not contacted yet"]]),
       h("button", { class: "linkbtn", onclick: () => go({ ev: "", cat: "", intent: "", eng: "", icp: "", work: "" }) }, "Clear")));
@@ -337,6 +342,7 @@ function accountPanel(a: any, initial: any) {
         h("div", { class: `pbig e${c.engagementStrength}` }, h("small", null, "CONTACT ENGAGEMENT"), h("b", null, c.engagementLabel),
           h("div", null, c.engagement),
           h("div", { class: "faint" }, "This person's own evidence: replies, meetings, verified attendance or registration."))),
+      ...(c.scoring?.length ? [blockEl("Why this priority", h("ul", { class: "scorebd" }, c.scoring.map((t: string) => h("li", null, t))))] : []),
       blockEl("Event & engagement history",
         evs.length ? h("div", { class: "evh" }, evs.map((e: any) => h("div", { class: "evrow2" },
           h("div", null, h("b", null, short(e.name)), h("span", { class: "faint" }, ` · ${e.category} · ${fmt.day(e.date)}`)),

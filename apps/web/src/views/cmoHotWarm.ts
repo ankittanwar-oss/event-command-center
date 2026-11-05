@@ -12,6 +12,8 @@ const METRIC_LABEL: Record<string, string> = {
   hot_total: "Hot contacts", hot_worked: "Hot contacts worked", hot_unworked: "Hot leads to target", hot_cov: "Hot contacts (worked and unworked)",
   warm_total: "Warm contacts", warm_worked: "Warm contacts worked", warm_unworked: "Warm leads to target", warm_cov: "Warm contacts (worked and unworked)",
   unworked: "Leads to target", total: "Hot/Warm leads",
+  associated: "Sponsored-event contacts", attended: "Sponsored-event attendees", registered: "Registered / list only", qualified: "Qualified Hot/Warm",
+  signals: "Sponsored event signals (not Warm)", worked: "Contacts worked",
 };
 
 export async function hotWarmSection(route: Route): Promise<HTMLElement> {
@@ -66,7 +68,7 @@ export async function hotWarmSection(route: Route): Promise<HTMLElement> {
       h("div", { class: "hwctl" }, sel("esort", esort, [["gap", "Most unworked"], ["lowest", "Lowest coverage"], ["hot", "Most Hot"], ["warm", "Most Warm"], ["date", "Newest event"]]))),
     h("div", { class: "tbl-wrap" }, h("table", { class: "hwtable simple" },
       h("thead", null, h("tr", null, h("th", null, "Event"), h("th", { class: "n" }, "Hot"), h("th", { class: "n" }, "Hot worked"), h("th", { class: "n" }, "Warm"), h("th", { class: "n" }, "Warm worked"), h("th", { class: "n" }, "To target"))),
-      ...[["Our events (check-ins)", evs.filter((e) => e.category !== "sponsored")], ["Conferences (organiser attendee lists)", evs.filter((e) => e.category === "sponsored")]]
+      ...[["Our events (check-ins)", evs.filter((e) => e.category !== "sponsored")], ["Sponsored conferences (qualified contacts only)", evs.filter((e) => e.category === "sponsored")]]
         .filter(([, l]) => (l as any[]).length).map(([title, l]) => h("tbody", null,
           h("tr", { class: "grprow" }, h("td", { colspan: "6" }, title as string)),
           (l as any[]).map((e) => h("tr", { class: "clickrow", onclick: drill("event", e.eventId, "total", e.name) },
@@ -90,7 +92,16 @@ export async function hotWarmSection(route: Route): Promise<HTMLElement> {
 
   const defs = h("details", { class: "hwdefs" }, h("summary", null, "How Hot, Warm and Worked are defined"),
     h("ul", null, Object.values(d.definitions).map((t: any) => h("li", null, t))));
-  return h("div", null, h("div", { class: "kbar" }, h("span", { class: "faint" }, "Showing: "), sel("olist", olist, [["", "All attendees"], ["ours", "Our events only"], ["lists", "Conference lists only"], ["icp", "Conference lists: ICP-fit accounts only"]])), snapshot, eventTable, sdrTable, gaps, defs);
+  // ---- Sponsored Event Signals (secondary, collapsed): execution on ACC/RLLB/CLOC contacts without calling them Warm.
+  const spn = (e: any, metric: string, n: number) => h("td", { class: "n" }, n ? h("span", { class: "link", onclick: (ev: Event) => { ev.stopPropagation(); openDrill(f, part, olist, "sponsored", e.eventId, metric, e.name); } }, fmt.n(n)) : h("span", { class: "faint" }, "0"));
+  const sponsored = (d.sponsored ?? []).length ? h("details", { class: "card hwcard spsig" },
+    h("summary", null, h("h2", { style: "display:inline" }, "Sponsored Event Signals"), h("span", { class: "hwsub" }, " · conference contacts, tracked separately from Hot/Warm")),
+    h("div", { class: "tbl-wrap" }, h("table", { class: "hwtable simple" },
+      h("thead", null, h("tr", null, ["Event", "Contacts", "Attended", "Registered / list", "Qualified Hot/Warm", "Other signals", "Worked", "Unworked"].map((t, i) => h("th", { class: i ? "n" : "" }, t)))),
+      h("tbody", null, d.sponsored.map((e: any) => h("tr", null, h("td", null, e.name), spn(e, "associated", e.associated), spn(e, "attended", e.attended), spn(e, "registered", e.registeredOnly),
+        spn(e, "qualified", e.qualified), spn(e, "signals", e.signals), spn(e, "worked", e.worked), spn(e, "unworked", e.unworked)))))),
+    h("div", { class: "hwfoot faint" }, "Sponsored-event contacts become Warm only when their event signal plus other verified HubSpot engagement is above 1.0. Everyone else stays here as a signal, not hidden.")) : null;
+  return h("div", null, h("div", { class: "kbar" }, h("span", { class: "faint" }, "Showing: "), sel("olist", olist, [["", "All attendees"], ["ours", "Our events only"], ["lists", "Conference lists only"], ["icp", "Conference lists: ICP-fit accounts only"]])), snapshot, eventTable, ...(sponsored ? [sponsored] : []), sdrTable, gaps, defs);
 }
 
 async function openDrill(f: any, part: string, olist: string, scope: string, id: string, metric: string, name: string) {
@@ -130,9 +141,10 @@ async function openDrill(f: any, part: string, olist: string, scope: string, id:
         ...[["Good leads to target", g.items.filter((x) => !x.r.worked)], ["Already worked", g.items.filter((x) => x.r.worked)]].filter(([, l]) => (l as any[]).length).flatMap(([t, l]) => [
           h("div", { class: `subhd ${t === "Already worked" ? "done" : "go"}` }, `${t} (${(l as any[]).length})`),
           ...(l as Array<{ r: any; e: any }>).map(({ r, e }) => h("div", { class: `lead ${r.worked ? "w" : "t"}` },
-          h("div", { class: "l1" }, redactBox(r), h("b", null, r.contactName), h("span", { class: `hwcls ${r.cls}` }, r.cls === "hot" ? "Hot" : "Warm"),
+          h("div", { class: "l1" }, redactBox(r), h("b", null, r.contactName), h("span", { class: `hwcls ${r.cls}` }, r.cls === "hot" ? "Hot" : r.cls === "warm" ? "Warm" : "Event signal"),
             r.worked ? h("span", { class: "hwst w" }, r.workedByOther ? `Worked by ${r.workedByOther.by}` : "Worked") : null, h("span", { class: "sp" }), hsLink("contact", r.contactId)),
           h("div", { class: "l2" }, `${r.companyName ?? "No company"} · Account intent: ${r.companyIntent ?? "–"} · Status: ${nice(r.contactStatus)}`),
+          r.breakdown?.length ? h("details", { class: "l2 bd" }, h("summary", null, "Why"), h("ul", null, r.breakdown.map((t: string) => h("li", null, t)))) : null,
           r.sheetNotes?.length ? h("div", { class: "l2 snote" }, `Sheet note: ${r.sheetNotes.join(" · ")}`) : null,
           r.workedByOther ? h("div", { class: "l2 byo" }, r.workedByOther.sameContact ? `${r.workedByOther.by} reached out to this person on ${fmt.day(r.workedByOther.at)}` : `Account being worked: ${r.workedByOther.by} contacted ${r.workedByOther.contactName ?? "a colleague"} at this company on ${fmt.day(r.workedByOther.at)}`) : null,
           h("div", { class: "l2 faint" }, `${partOf(e)} · Last contacted: ${r.lastContacted ? fmt.day(r.lastContacted) : "Never"} · Owner: ${r.sdrName}`)))]));

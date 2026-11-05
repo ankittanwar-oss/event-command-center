@@ -567,10 +567,10 @@ function hwPopulation(facts: LeadFact[], q: URLSearchParams, today: string, x: H
   return { nf, pop, part };
 }
 type ByOther = { at: string; ownerId: string | null; contactName: string | null; sameContact: boolean } | null;
-type HwRec = { f: LeadFact; cls: "hot" | "warm"; evidence: string; worked: boolean; byOther: ByOther };
+type HwRec = { f: LeadFact; cls: "hot" | "warm"; evidence: string; worked: boolean; byOther: ByOther; signal?: string | null; breakdown?: string[] };
 /** Worked = the current SDR touched this contact since the event, OR another SDR/AE did outreach to this contact or to
  *  any other contact at the same company since the event (the account is being worked, so it is not a gap). */
-function hwRecords(pop: LeadFact[]): HwRec[] {
+function hwRecords(pop: LeadFact[], includeAll = false): Array<HwRec & { signal?: string | null; breakdown?: string[] }> {
   const byCo = new Map<string, Array<{ at: string; ownerId: string | null; contactId: string; contactName: string | null }>>();
   for (const f of pop) if (f.companyId) {
     const l = byCo.get(f.companyId) ?? [];
@@ -580,7 +580,7 @@ function hwRecords(pop: LeadFact[]): HwRec[] {
   }
   const out: HwRec[] = [];
   for (const f of pop) {
-    const c = leadHotWarm(f); if (!c.cls) continue;
+    const c = leadHotWarm(f); if (!c.cls && !includeAll) continue;
     const own = (f.currentSdrTouches ?? 0) > 0;
     let byOther: ByOther = null;
     if (!own) {
@@ -590,7 +590,7 @@ function hwRecords(pop: LeadFact[]): HwRec[] {
         if (t) byOther = { at: t.at, ownerId: t.ownerId, contactName: t.contactName, sameContact: false };
       }
     }
-    out.push({ f, cls: c.cls, evidence: c.evidence, worked: own || !!byOther, byOther });
+    out.push({ f, cls: c.cls as any, evidence: c.evidence, worked: own || !!byOther, byOther, signal: c.signal, breakdown: c.breakdown });
   }
   return out;
 }
@@ -631,6 +631,18 @@ export function cmoHotWarm(facts: LeadFact[], q: URLSearchParams, today: string,
   const sdrIds = [...new Set(contacts.map((c) => c.f.sdrOwnerId ?? "unassigned"))];
   const sdrs = sdrIds.map((id) => ({ ownerId: id, name: id === "unassigned" ? "Unassigned" : rosterById.get(id)?.name ?? id, ...hwCounts(contacts.filter((c) => (c.f.sdrOwnerId ?? "unassigned") === id)) }));
   const all = hwCounts(contacts);
+  // Sponsored Event Signals (secondary): every contact associated with a sponsored event, so follow-up execution stays
+  // visible without calling them Warm. One row per (event, contact).
+  const spRecs = hwRecords(pop.filter((f) => f.eventCategory === "sponsored"), true);
+  const sponsored = [...new Set(spRecs.map((r) => r.f.eventId))].map((id) => {
+    const l = spRecs.filter((r) => r.f.eventId === id);
+    const m = evMeta.get(id)!;
+    return { eventId: id, name: m.name, date: m.date, associated: l.length,
+      attended: l.filter((r) => participationScope(r.f) === "attended").length,
+      registeredOnly: l.filter((r) => participationScope(r.f) !== "attended").length,
+      qualified: l.filter((r) => r.cls).length, signals: l.filter((r) => !r.cls).length,
+      worked: l.filter((r) => r.worked).length, unworked: l.filter((r) => !r.worked).length };
+  }).sort((a, b) => b.associated - a.associated);
   // Execution gaps: facts only, each linked to its records.
   const gaps: Array<{ text: string; scope: string; id: string; metric: string }> = [];
   const topHot = [...events].sort((a, b) => b.hotUnworked - a.hotUnworked)[0];
@@ -643,10 +655,10 @@ export function cmoHotWarm(facts: LeadFact[], q: URLSearchParams, today: string,
   if (un && un.hotTotal + un.warmTotal) gaps.push({ text: `${un.hotTotal + un.warmTotal} Hot/Warm event contacts have no SDR owner.`, scope: "sdr", id: "unassigned", metric: "total" });
   return {
     filters: nf, participation: part || "all", thresholds: rules.coverageColors ?? { green: 80, amber: 50 },
-    all, events, sdrs, gaps,
+    all, events, sdrs, gaps, sponsored,
     definitions: {
-      hot: "Hot lead = a documented conversation with this person: a real reply (not auto-replies or calendar notices), a meeting, or a note our team logged on the contact around the event (e.g. a booth conversation).",
-      warm: "Warm lead = attended the event: check-in / attended date in HubSpot, the roundtable sheet, or the organiser's attendee list uploaded by our team (conference attendee). Registration only, unknown attendance and no-shows are not Warm.",
+      hot: "Hot lead = direct intent from this person: a real reply (not auto-replies or calendar notices), a meeting, or (SpotDraft-hosted events) a note our team logged around the event.",
+      warm: "Warm lead, SpotDraft-hosted events (Beacon, Beacon LIVE, webinars, demo days, owned roundtables): verified attendance, UNCHANGED. Sponsored events (ACC, RLLB, CLOC, other conferences): strongest event signal (list 0, registered 0.25, attended 0.5, verified conversation 1.0) + independent HubSpot engagement (email clicks/replies, website, ads) must total above 1.0. Below that it is a Sponsored Event Signal, shown separately, not Warm.",
       worked: "Worked = anyone at SpotDraft (the SDR, another SDR, an AE or the events team) reached this person or anyone else at the same company after the event. To target = the account has not been touched at all since the event.",
       company: "Hot/Warm LEADS are people. Hot/Warm/Surging ACCOUNTS are the company Account Intent Level in HubSpot. They are reported separately and one never sets the other: a Warm account can have no Warm leads, and a Cold account can have a Hot lead.",
     },
@@ -657,12 +669,18 @@ export function cmoHotWarm(facts: LeadFact[], q: URLSearchParams, today: string,
 export function cmoHotWarmDrill(facts: LeadFact[], q: URLSearchParams, today: string, rules: Rules, x?: HwExtra) {
   const { nf, pop } = hwPopulation(facts, q, today, x);
   const scope = q.get("scope") ?? "all", id = q.get("id") ?? "", metric = q.get("metric") ?? "total";
-  const recs = hwRecords(pop);
-  let list: Array<HwRec & { events?: string[] }> = scope === "event" ? recs.filter((r) => r.f.eventId === id) : hwContacts(recs);
+  const recs = scope === "sponsored" ? hwRecords(pop.filter((f) => f.eventCategory === "sponsored" && f.eventId === id), true) : hwRecords(pop);
+  let list: Array<HwRec & { events?: string[]; breakdown?: string[]; signal?: string | null }> = scope === "event" || scope === "sponsored" ? recs.filter((r) => r.f.eventId === id) : hwContacts(recs);
   if (scope === "sdr") list = list.filter((r) => (r.f.sdrOwnerId ?? "unassigned") === id);
-  const [cls, kind] = metric.split("_");
+  if (scope === "sponsored") {
+    if (metric === "attended") list = list.filter((r) => participationScope(r.f) === "attended");
+    if (metric === "registered") list = list.filter((r) => participationScope(r.f) !== "attended");
+    if (metric === "qualified") list = list.filter((r) => r.cls);
+    if (metric === "signals") list = list.filter((r) => !r.cls);
+  }
+  const [cls, kind] = scope === "sponsored" ? ["", metric] : metric.split("_");
   if (cls === "hot" || cls === "warm") list = list.filter((r) => r.cls === cls);
-  const k = cls === "hot" || cls === "warm" ? kind : cls;
+  const k = scope === "sponsored" ? metric : cls === "hot" || cls === "warm" ? kind : cls;
   if (k === "worked") list = list.filter((r) => r.worked);
   if (k === "unworked") list = list.filter((r) => !r.worked);
   const byContact = new Map<string, LeadFact[]>();
@@ -674,7 +692,8 @@ export function cmoHotWarmDrill(facts: LeadFact[], q: URLSearchParams, today: st
     const lv = (f.accountIntent?.level ?? "") || null;
     return {
       contactId: f.contactId, contactName: f.contactName, jobTitle: f.jobTitle, companyId: f.companyId, companyName: f.companyName,
-      sdrName: f.sdrOwnerId ? rosterById.get(f.sdrOwnerId)?.name ?? f.sdrOwnerId : "Unassigned", cls: r.cls, evidence: r.evidence,
+      sdrName: f.sdrOwnerId ? rosterById.get(f.sdrOwnerId)?.name ?? f.sdrOwnerId : "Unassigned", cls: r.cls ?? "signal", evidence: r.evidence,
+      breakdown: r.breakdown ?? leadHotWarm(f).breakdown,
       companyIntent: lv, worked: r.worked, lastSdrOutreach: lastOwn,
       contactStatus: (f as any).contactLeadStatus ?? null,
       sheetNotes: (x?.notes.get(f.contactId) ?? []).map((n) => `${n.note} (${n.tab})`),

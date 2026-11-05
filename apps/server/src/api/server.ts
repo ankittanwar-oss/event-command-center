@@ -14,7 +14,7 @@ import { checkAppAuth, HttpError, readJson, requireAdmin, SECURITY_HEADERS, send
 import * as v from "./views.js";
 import { clearReengage, loadReengage, loadRedactions, redactedIds, restoreRedaction, saveReengage, saveRedaction, sheetNotes } from "./redactions.js";
 
-export const BUILD = "update-46";
+export const BUILD = "update-47";
 
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",

@@ -46,6 +46,9 @@ export interface Rules {
   customerLifecycleStages: string[];
   disqualifiedLeadStatuses: string[];
   sponsored: { requireAttendance: boolean; allowPriorConversation: boolean };
+  /** Sponsored-event (ACC, RLLB, CLOC, other third-party conferences) contact scoring, on the HubSpot Contact Engagement
+   *  Score scale (an owned-event attendance + registration = 2.0 there). Strongest signal per event, never stacked. */
+  sponsoredScoring: { listOnly: number; registered: number; attended: number; conversation: number; warmAbove: number; eventComponentWeight: number };
   attendanceWindow: { daysBefore: number; daysAfter: number };
   /** Touches on the event day count as post-event when this is 0; set to 1 to start the next day. */
   postEventStartOffsetDays: number;
@@ -120,6 +123,7 @@ export const DEFAULT_RULES: Rules = {
   customerLifecycleStages: ["customer"],
   disqualifiedLeadStatuses: ["UNQUALIFIED"],
   sponsored: { requireAttendance: true, allowPriorConversation: true },
+  sponsoredScoring: { listOnly: 0, registered: 0.25, attended: 0.5, conversation: 1.0, warmAbove: 1.0, eventComponentWeight: 0.1 },
   attendanceWindow: { daysBefore: 1, daysAfter: 3 },
   postEventStartOffsetDays: 0,
   multiWeekMinWeeks: 2,

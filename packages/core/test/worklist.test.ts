@@ -154,10 +154,11 @@ describe("contact worklist", () => {
     const a = contactAction(computeLeadFacts(dataset({ deals: [deal({ isClosed: true, isWon: false, sqlDate: "2025-03-01", closeDate: "2025-06-01" } as any)] }), R, T)[0]!, T, R);
     assert.equal(a.group, "first_outreach");
   });
-  test("sponsored attendance is labelled as conference attendance (organiser list)", async () => {
+  test("sponsored attendance is labelled as a sponsored-event signal (organiser attendee list)", async () => {
     const { engagementReason } = await import("../src/index.js");
     const f = computeLeadFacts(dataset({ events: [event({ category: "sponsored", name: "ACC EVENT 2026" })], links: [["e1", "c1", "2026-10-01"]] }), R, T)[0]!;
-    assert.match(engagementReason(f).text, /Conference attendee.*organiser list/);
+    assert.match(engagementReason(f).text, /Attended ACC EVENT 2026 \(organiser attendee list\)\. Sponsored-event signal/);
+    assert.equal(engagementReason(f).strength, 2);
   });
   test("zero touches with no SLA deadline is grey, not red", async () => {
     const { contactAction } = await import("../src/index.js");
@@ -388,13 +389,42 @@ test("CMO contact Hot/Warm: Warm company + registration-only contact is neither;
   assert.equal(leadHotWarm(fs.m!).cls, "hot");
 });
 
-test("a note logged by our team around the event makes the person a Hot lead; conference attendee from organiser list is Warm", async () => {
+test("sponsored-event scoring (validation scenarios A–I)", async () => {
+  const { leadHotWarm, engagementReason } = await import("../src/index.js");
+  const NOV = "2026-11-04";
+  const sc = (o: any) => ({ attendance: 10, registration: 10, engagement: 2, heyreachIntent: null, registeredDate: null, ...o });
+  const run = (ev: any, links: any[], extra: any = {}) => computeLeadFacts(dataset({ events: [event(ev)], links, ...extra }), R, NOV);
+  const ACC = { date: "2026-10-04", category: "sponsored", name: "ACC EVENT 2026" };
+  // A/B/C: hosted Beacon, webinar, demo day attendee -> unchanged existing Warm
+  for (const cat of ["owned", "webinar"]) {
+    const f = run({ date: "2026-10-20", category: cat, name: "Beacon LIVE NYC" }, [["e1", "c1", "2026-10-20"]])[0]!;
+    assert.equal(leadHotWarm(f).cls, "warm", cat); assert.match(leadHotWarm(f).breakdown[0]!, /Hosted event.*existing Warm/);
+  }
+  // D: ACC registration only -> not Warm
+  const d = run(ACC, [["e1", "c1"]], { contacts: [contact({ scores: sc({ attendance: 0, engagement: 1, registeredDate: "2026-09-01" }) } as any)] })[0]!;
+  assert.equal(leadHotWarm(d).cls, null); assert.match(engagementReason(d).text, /Registered for ACC/); assert.equal(engagementReason(d).strength, 3);
+  // E: ACC attendee, no other intent -> 0.5, sponsored signal, not Warm
+  const e = run(ACC, [["e1", "c1", "2026-10-05"]], { contacts: [contact({ scores: sc({}) } as any)] })[0]!;
+  assert.equal(leadHotWarm(e).cls, null); assert.equal(leadHotWarm(e).signal, "sponsored"); assert.match(leadHotWarm(e).breakdown.join(" "), /\+0\.5.*Total 0\.5/);
+  // F: ACC attendee + independent HubSpot engagement (email clicks 0.8) -> 1.3 > 1 -> Warm
+  const fF = run(ACC, [["e1", "c1", "2026-10-05"]], { contacts: [contact({ scores: sc({ engagement: 2.8, emailClick: 10 }) } as any)] })[0]!;
+  assert.equal(leadHotWarm(fF).cls, "warm"); assert.match(engagementReason(fF).text, /Attended ACC.*email clicks.*Multiple signals/);
+  // conversation note at a sponsored event: 1.0, not Warm on its own; + clicks -> Warm
+  const note = act({ ts: "2026-10-05T15:00:00Z", kind: "NOTE", objectType: "notes" as any, direction: null, title: "Spoke at booth" });
+  const conv = run(ACC, [["e1", "c1", "2026-10-05"]], { acts: [note], contacts: [contact({ scores: sc({}) } as any)] })[0]!;
+  assert.equal(leadHotWarm(conv).cls, null); assert.match(engagementReason(conv).text, /Spoke with us at ACC/);
+  // H: list only (no attendance, no registration) -> 0 -> never Warm
+  const h0 = run(ACC, [["e1", "c1"]], { contacts: [contact({ scores: sc({ attendance: 0, registration: 0, engagement: 0 }) } as any)] })[0]!;
+  assert.equal(leadHotWarm(h0).cls, null);
+  // reply after the event stays Hot regardless of sponsored origin
+  const rep = run(ACC, [["e1", "c1", "2026-10-05"]], { acts: [act({ ts: "2026-10-20T10:00:00Z", kind: "INCOMING_EMAIL", direction: "INCOMING_EMAIL", title: "Re: ACC" })] })[0]!;
+  assert.equal(leadHotWarm(rep).cls, "hot");
+});
+
+test("a note logged by our team around a HOSTED event makes the person a Hot lead (unchanged)", async () => {
   const { leadHotWarm } = await import("../src/index.js");
   const NOV = "2026-11-04";
-  const spoke = computeLeadFacts(dataset({ events: [event({ date: "2026-10-04", category: "sponsored", name: "ACC EVENT 2026" })], links: [["e1", "c1", "2026-10-05"]],
-    acts: [act({ ts: "2026-10-05T15:00:00Z", kind: "NOTE", objectType: "notes" as any, direction: null, title: "Spoke at booth, interested in CLM for procurement" })] }), R, NOV)[0]!;
-  assert.equal(leadHotWarm(spoke).cls, "hot"); assert.match(leadHotWarm(spoke).evidence, /Spoke with us at ACC/);
-  assert.equal(spoke.touchesSinceEligibility, 0); // a note is evidence, never an outreach touch
-  const list = computeLeadFacts(dataset({ events: [event({ date: "2026-10-04", category: "sponsored", name: "ACC EVENT 2026" })], links: [["e1", "c1", "2026-10-05"]] }), R, NOV)[0]!;
-  assert.equal(leadHotWarm(list).cls, "warm");
+  const spoke = computeLeadFacts(dataset({ events: [event({ date: "2026-10-20", category: "owned", name: "Beacon LIVE NYC" })], links: [["e1", "c1", "2026-10-20"]],
+    acts: [act({ ts: "2026-10-20T15:00:00Z", kind: "NOTE", objectType: "notes" as any, direction: null, title: "Great chat about CLM" })] }), R, NOV)[0]!;
+  assert.equal(leadHotWarm(spoke).cls, "hot"); assert.equal(spoke.touchesSinceEligibility, 0);
 });

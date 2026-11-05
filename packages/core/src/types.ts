@@ -67,7 +67,9 @@ export interface Contact {
 }
 
 /** HubSpot contact-level engagement signals, exactly as recorded (no thresholds invented). */
-export interface ContactScores { attendance: number | null; registration: number | null; engagement: number | null; heyreachIntent: string | null; registeredDate: string | null }
+export interface ContactScores { attendance: number | null; registration: number | null; engagement: number | null; heyreachIntent: string | null; registeredDate: string | null;
+  /** HubSpot component scores (0/5/10, -1 = negative) that feed Contact Engagement Score. Read-only. */
+  emailClick?: number | null; emailReply?: number | null; websiteVisit?: number | null; linkedinAd?: number | null; googleAd?: number | null; newsletter?: number | null }
 
 export interface EventRecord {
   id: string;

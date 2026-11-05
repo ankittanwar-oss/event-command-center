@@ -1,6 +1,6 @@
 // SDR daily worklist: turns lead facts into ONE next action per account, placed in exactly one section.
 // Presentation logic only: it reads existing facts and rules and never changes status, SLA or any reported metric.
-import { rosterById, type CadenceRule, type Rules } from "./config.js";
+import { DEFAULT_RULES, rosterById, type CadenceRule, type Rules } from "./config.js";
 import { expectedTouches } from "./leads.js";
 import { DISPOSITION_CODES, dispositionsFor, type DispositionSet } from "./dispositions.js";
 import { addDays, businessDaysBetween, toDate } from "./dates.js";
@@ -387,7 +387,7 @@ export interface ContactAction { group: ContactGroup; action: string; reason: st
  *   2 P3 verified attendance at a sponsored conference (SpotDraft engagement unverified)
  *   3 P4 registered only / attendance unknown
  *   4 P5 no qualifying individual engagement (e.g. confirmed no-show): company intent only */
-export const ENGAGEMENT_LABEL = ["High intent", "Verified attendee", "Conference attendee", "Registered only", "Company intent only"] as const;
+export const ENGAGEMENT_LABEL = ["High intent", "Verified attendee", "Sponsored event signal", "Registered only", "Company intent only"] as const;
 export function engagementReason(f: LeadFact): { text: string; strength: number; label: string; participation: string } {
   const p = f.participation ?? (f.attendance === "attended" ? "attended" : f.attendance === "no_show" ? "registered_only" : "unknown");
   const mk = (text: string, strength: number) => ({ text, strength, label: ENGAGEMENT_LABEL[strength]!, participation: p });
@@ -395,10 +395,21 @@ export function engagementReason(f: LeadFact): { text: string; strength: number;
   if (reply) return mk(`Replied to SDR ${reply}`, 0);
   if (f.nextMeetingAt) return mk(`Meeting scheduled ${toDate(f.nextMeetingAt)}`, 0);
   if (/^Meeting on/.test(f.inPlayReason ?? "")) return mk((f.inPlayReason ?? "").replace("Meeting on", "Meeting"), 0);
+  // Sponsored conferences (ACC, RLLB, CLOC, ...): lower-weighted model. Never Hot/Warm from the event alone.
+  if (f.eventCategory === "sponsored") {
+    const sp = sponsoredScore(f);
+    const ev0 = f.eventName.split(/[|:]/)[0]!.trim().slice(0, 40);
+    if (sp.qualifies) return { ...mk(`${sp.eventText}${sp.signals.length ? ` + ${sp.signals.join(", ")}` : ""}. Multiple signals detected.`, 1), label: "Multiple signals" };
+    if (sp.kind === "conversation") return mk(`${sp.eventText}. Sponsored-event conversation; additional intent not verified.`, 2);
+    if (sp.kind === "attended") return mk(`Attended ${ev0} (organiser attendee list). Sponsored-event signal; additional intent not verified.`, 2);
+    if (sp.kind === "registered") return mk(`Registered for ${ev0}. Attendance not verified.`, 3);
+    if (p === "no_show") return mk(`Registered for ${ev0}; confirmed no-show`, 4);
+    return mk(`On the ${ev0} list. Attendance not verified.`, 3);
+  }
   // A note logged by our team around the event ("spoke at the booth") = a documented event conversation.
   if (f.eventNote) return mk(`Spoke with us at ${f.eventName.split(/[|:]/)[0]!.trim().slice(0, 40)} (note ${toDate(f.eventNote.at)}${f.eventNote.text ? `: "${f.eventNote.text.slice(0, 80)}${f.eventNote.text.length > 80 ? "…" : ""}"` : ""})`, 0);
   const ev = f.eventName.split(/[|:]/)[0]!.trim().slice(0, 40);
-  if (p === "attended") return f.eventCategory === "sponsored" ? mk(`Conference attendee: ${ev} (organiser list)`, 2) : mk(`Verified attendee: ${ev}`, 1);
+  if (p === "attended") return mk(`Verified attendee: ${ev}`, 1);
   if (p === "no_show") return mk(`Registered for ${ev}; confirmed no-show`, 4);
   if (p === "registered_only") return mk(`Registered for ${ev}; no attendance record`, 3);
   return mk(`Registered for ${ev}; attendance unknown`, 3);
@@ -510,7 +521,9 @@ export function contactWorklist(rows: LeadFact[], today: string, rules: Rules, d
     let top = scored[0]!;
     if (top.a.group === "first_outreach") top = scored.find((s) => s.a.group !== "first_outreach" && s.f.touchesSinceEligibility > 0) ?? top;
     const f = top.f;
-    const best = [...scored].sort((x, y) => x.e.strength - y.e.strength)[0]!.e;
+    const bestS = [...scored].sort((x, y) => x.e.strength - y.e.strength)[0]!;
+    const best = bestS.e;
+    const hw = leadHotWarm(bestS.f);
     const ids = new Set(leads.flatMap((l) => l.touchIds));
     const yourTouches = Math.max(0, ...leads.map((l) => l.currentSdrTouches ?? 0));
     const yourLastTouchAt = leads.map((l) => l.currentSdrLastTouchAt ?? null).filter((x): x is string => !!x).sort().pop() ?? null;
@@ -527,7 +540,7 @@ export function contactWorklist(rows: LeadFact[], today: string, rules: Rules, d
       contactId: f.contactId, contactName: f.contactName, jobTitle: f.jobTitle, contactEmail: f.contactEmail,
       companyId: f.companyId, companyName: f.companyName, sdrOwnerId: f.sdrOwnerId, sdrName: f.sdrOwnerId ? rosterById.get(f.sdrOwnerId)?.name ?? null : null,
       sdrSource: f.sdrSource ?? null, allocationDate: f.allocationDate, eligibilityDate: f.eligibilityDate,
-      temperature: f.temperature ?? (f.temperatureRaw || null), engagement: best.text, engagementStrength: best.strength,
+      temperature: f.temperature ?? (f.temperatureRaw || null), engagement: best.text, engagementStrength: best.strength, scoring: hw.breakdown, contactHotWarm: hw.cls, bestEventCategory: bestS.f.eventCategory,
       intent: { level: intentLevel(f), raw: f.accountIntent?.level ?? null, since: f.accountIntent?.since ?? null, reason: f.accountIntent?.reason ?? null,
         recentSignals: f.accountIntent?.recentSignals ?? null, warmAt: f.accountIntent?.warmAt ?? null, surgingAt: f.accountIntent?.surgingAt ?? null, coldAt: f.accountIntent?.coldAt ?? null,
         sdrCategory: f.accountIntent?.sdrCategory ?? null, lifecycleCustom: f.accountIntent?.lifecycleCustom ?? null, icp: f.accountIntent?.icp ?? f.icpTier ?? null,
@@ -696,12 +709,53 @@ export function accountSummary(accounts: ReturnType<typeof accountWorklist>) {
 // Mutually exclusive (Hot wins). Per event row the attendance must be for THAT event; Hot is the person's own signal.
 // ---------------------------------------------------------------------------------------------------------------
 export type HotWarm = "hot" | "warm" | null;
-export function leadHotWarm(f: LeadFact): { cls: HotWarm; evidence: string } {
+export function leadHotWarm(f: LeadFact): { cls: HotWarm; evidence: string; breakdown: string[]; signal: "sponsored" | null } {
   const e = engagementReason(f);
-  if (e.strength === 0) return { cls: "hot", evidence: e.text };
+  if (e.strength === 0) return { cls: "hot", evidence: e.text, breakdown: [`Direct intent: ${e.text} → existing Hot rule`], signal: null };
   const p = f.participation ?? (f.attendance === "attended" ? "attended" : "unknown");
-  if (p === "attended") return { cls: "warm", evidence: `${f.eventCategory === "sponsored" ? "Conference attendee (organiser attendee list uploaded to HubSpot)" : "Verified attendee"}: ${f.eventName}` };
-  return { cls: null, evidence: e.text };
+  if (f.eventCategory === "sponsored") {
+    // Sponsored events: strongest participation signal for this event + independent HubSpot engagement; Warm only above the threshold.
+    const sp = sponsoredScore(f);
+    return { cls: sp.qualifies ? "warm" : null, evidence: e.text, breakdown: sp.breakdown, signal: sp.qualifies ? null : "sponsored" };
+  }
+  // SpotDraft-hosted events (Beacon, Beacon LIVE, webinars, demo days, owned roundtables): UNCHANGED existing rule.
+  if (p === "attended") return { cls: "warm", evidence: `Verified attendee: ${f.eventName}`, breakdown: [`Hosted event: ${f.eventName.split(/[|:]/)[0]!.trim()} attendee → existing Warm qualification`], signal: null };
+  return { cls: null, evidence: e.text, breakdown: [], signal: null };
+}
+
+/** Independent (non-event) engagement from HubSpot Contact Engagement Score: the total minus its event components.
+ *  Observed HubSpot weights: event attendance + registration (10 each) = 2.0; email click 10 = 0.8; reply 10 = 1.0;
+ *  website visit 10 = 1.0. We never invent points: the number comes from HubSpot, only the event part is removed. */
+export function independentEngagement(f: LeadFact): { points: number; signals: string[] } {
+  const sc = f.contactScores;
+  if (!sc || sc.engagement === null || sc.engagement === undefined) return { points: 0, signals: [] };
+  const w = DEFAULT_RULES.sponsoredScoring.eventComponentWeight;
+  const ev = w * (Math.max(0, sc.attendance ?? 0) + Math.max(0, sc.registration ?? 0));
+  const points = Math.max(0, Math.round((sc.engagement - ev) * 100) / 100);
+  const pos = (v: number | null | undefined) => (v ?? 0) > 0;
+  const signals = [pos(sc.emailClick) ? "email clicks" : null, pos(sc.emailReply) ? "email replies" : null, pos(sc.websiteVisit) ? "website visits" : null,
+    pos(sc.linkedinAd) ? "LinkedIn ad engagement" : null, pos(sc.googleAd) ? "Google ad engagement" : null, pos(sc.newsletter) ? "blog/newsletter engagement" : null].filter((x): x is string => !!x);
+  if (points > 0 && !signals.length) signals.push("other marketing engagement");
+  return { points, signals };
+}
+
+/** Sponsored-event score for ONE event: strongest verified signal only (registration, attendance and conversation never stack). */
+export function sponsoredScore(f: LeadFact) {
+  const W = DEFAULT_RULES.sponsoredScoring;
+  const p = f.participation ?? (f.attendance === "attended" ? "attended" : "unknown");
+  const ev = f.eventName.split(/[|:]/)[0]!.trim().slice(0, 40);
+  const reg = f.contactScores?.registeredDate && f.eventDate ? Math.abs(Date.parse(f.contactScores.registeredDate) - Date.parse(f.eventDate)) <= 120 * 86_400_000 : false;
+  const kind: "conversation" | "attended" | "registered" | "list" = f.eventNote ? "conversation" : p === "attended" ? "attended" : reg ? "registered" : "list";
+  const pts = kind === "conversation" ? W.conversation : kind === "attended" ? W.attended : kind === "registered" ? W.registered : W.listOnly;
+  const eventText = kind === "conversation" ? `Spoke with us at ${ev}` : kind === "attended" ? `Attended ${ev}` : kind === "registered" ? `Registered for ${ev}` : `On the ${ev} list`;
+  const ind = independentEngagement(f);
+  const total = Math.round((pts + ind.points) * 100) / 100;
+  const qualifies = total > W.warmAbove;
+  const label = { conversation: "verified conversation", attended: "attendee (organiser attendee list)", registered: "registrant", list: "organiser list only" }[kind];
+  const breakdown = [`Sponsored event: ${ev} ${label} → +${pts}`,
+    ind.points > 0 ? `Additional intent (HubSpot engagement): ${ind.signals.join(", ")} → +${ind.points}` : "Additional intent: none recorded in HubSpot",
+    `Total ${total} ${qualifies ? `> ${W.warmAbove} → Warm (sponsored combined rule)` : `≤ ${W.warmAbove} → Sponsored event signal, not Warm`}`];
+  return { kind, points: pts, independent: ind.points, signals: ind.signals, total, qualifies, eventText, breakdown };
 }
 /** Participation scope used by the CMO filter (same statuses as the Daily Command Centre). */
 export function participationScope(f: LeadFact): "attended" | "registered" | "unknown" | "sponsored_list" | "no_show" {
