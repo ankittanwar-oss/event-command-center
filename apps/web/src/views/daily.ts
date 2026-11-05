@@ -223,7 +223,8 @@ export async function dailyView(route: Route, meta: any): Promise<HTMLElement> {
       h("div", { class: "oc2" }, h("b", null, c.contactName), c.jobTitle ? ` · ${c.jobTitle}` : "",
         h("span", { class: "osrc" }, ` — ${src.text}`, src.more > 0 ? h("span", { class: "more" }, ` +${src.more} more`) : null)),
       (() => { const se = strongestEvent(c); const note = (c.events ?? []).map((e: any) => e.eventNote).find(Boolean);
-        return se?.topic || note ? h("div", { class: "octopic" }, se?.topic ? `Topic: ${se.topic.length > 110 ? se.topic.slice(0, 110) + "…" : se.topic}` : "", note ? h("span", { class: "ocnote" }, `${se?.topic ? " · " : ""}Note: ${note.length > 90 ? note.slice(0, 90) + "…" : note}`) : null) : null; })(),
+        return se?.topic || note ? h("div", { class: "octopic" }, se?.topic ? `${short(se.name)}: ${se.topic.length > 90 ? se.topic.slice(0, 90) + "…" : se.topic}` : "",
+          se?.about?.hook ? h("div", { class: "ochook" }, `Talking point: ${se.about.hook}`) : null, note ? h("span", { class: "ocnote" }, `${se?.topic ? " · " : ""}Note: ${note.length > 90 ? note.slice(0, 90) + "…" : note}`) : null) : null; })(),
       h("div", { class: "oc3" }, h("span", { class: `onudge t-${nd.tone}` }, nd.text),
         b === "momentum" ? reengagePicker(a) : null,
         h("button", { class: "oexp", onclick: (e: Event) => { e.stopPropagation(); open(); } }, "Explore account →")));
@@ -350,6 +351,9 @@ function accountPanel(a: any, initial: any) {
           h("div", null, h("b", null, short(e.name)), h("span", { class: "faint" }, ` · ${e.category} · ${fmt.day(e.date)}`)),
           h("div", null, h("span", { class: `pp p-${e.participation}` }, partText(e)), h("span", { class: "faint" }, e.participationSource ? ` · ${e.participationSource}` : "")),
           e.topic ? h("div", { class: "evtopic" }, `Topic: ${e.topic}`) : null,
+          e.about ? h("details", { class: "evabout" }, h("summary", null, "About this session"),
+            h("div", null, h("b", null, "Speakers: "), e.about.speakers), h("div", null, e.about.summary),
+            h("div", { class: "evhook" }, h("b", null, "Conversation starter: "), e.about.hook)) : null,
           e.eventNote ? h("div", { class: "evnote" }, `Event team note: ${e.eventNote}`) : null))) : h("div", { class: "faint" }, "No event records")),
       h("details", { class: "pblk" }, h("summary", null, h("h3", { style: "display:inline" }, "Activity history")), timeline),
     );

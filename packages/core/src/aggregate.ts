@@ -32,8 +32,11 @@ export function normalizeFilters(f: Filters, today: string): NormalizedFilters {
   const out: NormalizedFilters = { ...f, sdrCleared: false, quarterRange: null, quarterLabel: "All quarters" };
   if (out.region && out.sdr && rosterById.get(out.sdr)?.region !== out.region) { out.sdr = ""; out.sdrCleared = true; }
   if (out.sdr && !rosterById.has(out.sdr)) { out.sdr = ""; out.sdrCleared = true; }
-  const q = (out.quarter || "this").trim();
-  if (q === "this") {
+  const q = (out.quarter || "q2on").trim();
+  if (q === "q2on") {
+    // Default: Q2 (Aug–Oct 2026, when event follow-up started) onwards, open-ended, so new Q3+ (Nov) leads are never dropped.
+    out.quarter = "q2on"; out.quarterRange = { start: "2026-08-01", end: "2099-12-31" }; out.quarterLabel = "Q2 onwards (Aug 2026 → today)";
+  } else if (q === "this") {
     const cq = fiscalQuarterOf(today);
     out.quarter = cq.key; out.quarterRange = { start: cq.start, end: cq.end }; out.quarterLabel = cq.label;
   } else if (/^FY\d{4}$/.test(q)) {

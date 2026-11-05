@@ -12,7 +12,7 @@ export function parseHash(): Route {
   const [view = "overview", qs = ""] = raw.split("?");
   const p = new URLSearchParams(qs);
   const filters = Object.fromEntries(FILTER_KEYS.map((k) => [k, p.get(k) ?? ""])) as FilterState;
-  if (!filters.quarter) filters.quarter = "this";
+  if (!filters.quarter) filters.quarter = "q2on";
   const extra = new URLSearchParams();
   for (const [k, v] of p) if (!(FILTER_KEYS as readonly string[]).includes(k)) extra.set(k, v);
   return { view: view || "overview", filters, extra };
@@ -22,7 +22,7 @@ export function buildHash(view: string, filters: Partial<FilterState>, extra?: R
   const p = new URLSearchParams();
   for (const k of FILTER_KEYS) {
     const v = filters[k];
-    if (v && !(k === "quarter" && v === "this")) p.set(k, v);
+    if (v && !(k === "quarter" && v === "q2on")) p.set(k, v);
   }
   for (const [k, v] of Object.entries(extra ?? {})) if (v) p.set(k, v);
   const s = p.toString();

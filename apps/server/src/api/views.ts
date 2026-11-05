@@ -15,7 +15,7 @@ export function parseFilters(q: URLSearchParams): Filters {
   const category = pick("category");
   const temperature = pick("temperature");
   return {
-    quarter: pick("quarter") || "this",
+    quarter: pick("quarter") || "q2on",
     region: (REGIONS.includes(region) ? region : "") as Region | "",
     sdr: pick("sdr"),
     eventId: pick("eventId"),

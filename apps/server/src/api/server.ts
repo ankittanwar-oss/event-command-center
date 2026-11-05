@@ -12,9 +12,10 @@ import { getSnapshot, invalidateSnapshot, ownerNames } from "./cache.js";
 import { clearDisposition, loadDispositions, saveDisposition } from "./dispositions.js";
 import { checkAppAuth, HttpError, readJson, requireAdmin, SECURITY_HEADERS, send } from "./http.js";
 import * as v from "./views.js";
+import { EVENT_DESCRIPTIONS } from "./eventDescriptions.js";
 import { clearReengage, loadReengage, loadRedactions, redactedIds, restoreRedaction, saveReengage, saveRedaction, sheetNotes, virtualEvents } from "./redactions.js";
 
-export const BUILD = "update-49";
+export const BUILD = "update-50";
 
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
@@ -64,7 +65,7 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL) {
       case "/api/cmo-hotwarm-drill": {
         const out: any = v.cmoHotWarmDrill(s.facts, q, t, rules, { redacted: await redactedIds(), notes: await sheetNotes() });
         const ve = await virtualEvents();
-        for (const r of out.rows ?? []) for (const e of r.events ?? []) { const tp = ve.topics.get(e.id); if (tp) e.topic = tp.topic; const n = ve.notes.get(`${e.id}:${r.contactId}`); if (n) e.eventNote = n; }
+        for (const r of out.rows ?? []) for (const e of r.events ?? []) { const tp = ve.topics.get(e.id); if (tp) e.topic = tp.topic; const ds = EVENT_DESCRIPTIONS[e.id]; if (ds) { e.about = ds; e.topic = ds.title; } const n = ve.notes.get(`${e.id}:${r.contactId}`); if (n) e.eventNote = n; }
         return send(res, 200, out);
       }
       case "/api/redactions": return send(res, 200, { items: await loadRedactions() });
@@ -78,6 +79,7 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL) {
           a.reengageOn = re.get(a.companyId ?? a.key) ?? re.get(a.key) ?? null;
           for (const c of a.contacts ?? []) for (const e of c.events ?? []) {
             const t = ve.topics.get(e.id); if (t) { e.topic = t.topic; e.partner = t.partner; }
+            const ds = EVENT_DESCRIPTIONS[e.id]; if (ds) { e.about = ds; e.topic = ds.title; }
             const n = ve.notes.get(`${e.id}:${c.contactId}`); if (n) e.eventNote = n;
           }
         }

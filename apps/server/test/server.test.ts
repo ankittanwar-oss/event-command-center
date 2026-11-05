@@ -167,7 +167,7 @@ describe("API views", () => {
     assert.equal(f.status, "");
   });
   test("overview honours region filter before KPIs and clears off-region SDR", () => {
-    const o = views.overview(facts, new URLSearchParams(`region=APAC&sdr=${BOBBI}`), "2026-10-30");
+    const o = views.overview(facts, new URLSearchParams(`quarter=this&region=APAC&sdr=${BOBBI}`), "2026-10-30");
     assert.equal(o.filters.sdrCleared, true);
     assert.equal(o.hot.eligible, 0);
     assert.equal(o.warm.eligible, 1);

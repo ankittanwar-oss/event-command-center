@@ -52,14 +52,14 @@ function filterBar(route: Route): HTMLElement {
   search.addEventListener("keydown", (e) => { if ((e as KeyboardEvent).key === "Enter") go({ search: search.value.trim() }); });
 
   return h("div", { class: "filters" },
-    sel("quarter", [["this", `This quarter (${meta.currentQuarter.key.slice(-2)})`], ...meta.quarters.map((q: any) => [q.key, q.label] as [string, string]), ["all", "All quarters"]], "Quarter"),
+    sel("quarter", [["q2on", "Q2 onwards (Aug 2026 → today)"], ["this", `This quarter (${meta.currentQuarter.key.slice(-2)})`], ...meta.quarters.map((q: any) => [q.key, q.label] as [string, string]), ["all", "All quarters"]], "Quarter"),
     sel("region", [["", "All regions"], ["NAM", "NAM"], ["EMEA", "EMEA"], ["APAC", "APAC"]], "Region"),
     sel("sdr", [["", f.region ? `All ${f.region} SDRs` : "All SDRs"], ...roster.map((s: any) => [s.ownerId, s.name] as [string, string])], "SDR"),
     // The Daily Command Centre keeps only Quarter / Region / SDR here; its own panel has search, queue and event filters.
     route.view === "daily" ? null : sel("category", [["", "All categories"], ["owned", "Owned"], ["sponsored", "Sponsored"], ["webinar", "Webinars"], ["roundtable", "Roundtables"]], "Category"),
     route.view === "daily" ? null : eventPicker(f.eventId, (v) => go({ eventId: v })),
     route.view === "daily" ? null : search,
-    h("button", { class: "reset", onclick: () => { location.hash = buildHash(route.view, { quarter: "this" }); } }, "Reset"),
+    h("button", { class: "reset", onclick: () => { location.hash = buildHash(route.view, { quarter: "q2on" }); } }, "Reset"),
   );
 }
 
