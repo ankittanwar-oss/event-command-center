@@ -60,11 +60,16 @@ export function tempPill(t: string | null, raw?: string | null) {
 }
 
 let portalId = "7712708";
-export function setPortal(id: string) { portalId = id; }
+export function setPortal(id: string) { if (id && /^\d+$/.test(String(id))) portalId = String(id); }
 export function hsLink(kind: "contact" | "company" | "deal", id: string | null | undefined, label = "↗") {
   if (!id) return null;
   const type = kind === "contact" ? "0-1" : kind === "company" ? "0-2" : "0-3";
-  return h("a", { class: "hs", href: `https://app.hubspot.com/contacts/${portalId}/record/${type}/${id}`, target: "_blank", rel: "noopener noreferrer", title: "Open in HubSpot" }, label);
+  const url = `https://app.hubspot.com/contacts/${portalId}/record/${type}/${id}`;
+  // Open explicitly: links sit inside clickable cards / buttons, whose own click handlers (or the button itself)
+  // otherwise swallow the click. Stop the card handler and open the record in a new tab.
+  return h("a", { class: "hs", href: url, target: "_blank", rel: "noopener noreferrer", title: "Open in HubSpot",
+    onclick: (e: Event) => { e.preventDefault(); e.stopPropagation(); window.open(url, "_blank", "noopener,noreferrer"); },
+    onkeydown: (e: KeyboardEvent) => { if (e.key === "Enter") e.stopPropagation(); } }, label);
 }
 
 export interface Col<T> { key: string; label: string; num?: boolean; render?: (r: T) => Child; sort?: (r: T) => string | number | null; title?: string; wrap?: boolean }
