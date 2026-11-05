@@ -12,6 +12,7 @@ import { loadRules } from "../rules.js";
 import { getSetting, setSetting } from "../db/repo.js";
 import { readAllTabs } from "../sheets/google.js";
 import { applySheet, parseTab, type SheetMerge, type SheetTab } from "../sheets/roundtables.js";
+import { parseVirtualEvents } from "../sheets/virtualEvents.js";
 
 const SYNC_LOCK = 778_001;
 
@@ -122,6 +123,15 @@ async function syncAll(hs: HubSpotClient, rules: Rules, full: boolean, records: 
 
   // 3b. Roundtable Google Sheet: registrations and attendance (source of truth for matched roundtables)
   const sheetInfo = await roundtableSheet(hs, rules, events, eventContacts, records, warnings);
+  // 3c. "Virtual events data" sheet: event topics + per-contact comments for SDR context (display only, read fresh every sync).
+  if (env.googleServiceAccountJson && env.virtualEventsSheetId) {
+    try {
+      const ve = parseVirtualEvents(await readAllTabs(env.googleServiceAccountJson, env.virtualEventsSheetId));
+      await setSetting("virtual_events", { readAt: new Date().toISOString(), ...ve });
+      records.virtual_event_topics = ve.events.length; records.virtual_event_notes = ve.notes.length;
+      if (ve.unmatchedTabs.length) warnings.push(`Virtual events sheet: ${ve.unmatchedTabs.length} tab(s) not matched to an event in the "Marketing event" tab: ${ve.unmatchedTabs.slice(0, 5).join("; ")}`);
+    } catch (e) { warnings.push(`Virtual events sheet could not be read (${errMessage(e)}); showing the last copy read.`); }
+  }
 
   const contactIds = [...new Set([...eventContacts.values()].flat())];
   records.registrations = [...eventContacts.values()].reduce((a, l) => a + l.length, 0);

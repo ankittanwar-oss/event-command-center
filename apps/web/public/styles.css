@@ -759,3 +759,6 @@ details.moresec > summary { cursor: pointer; font-weight: 600; padding: 8px 0; o
 .spsig>summary{cursor:pointer;padding:4px 0}.hwcls.signal{background:#f3f4f6;color:#4b5563}
 .lead .bd{font-size:12.5px;color:#4b5563}.lead .bd summary{cursor:pointer}.lead .bd ul{margin:4px 0 0 16px;padding:0}
 .scorebd{margin:0;padding-left:18px;font-size:13px}
+
+.octopic{font-size:12.5px;color:#4b5563;margin-top:3px;overflow-wrap:anywhere}.octopic .ocnote{color:#1d4ed8}
+.evtopic{font-size:12.5px;color:#374151;margin-top:2px}.evnote{font-size:12.5px;color:#1d4ed8;margin-top:2px}

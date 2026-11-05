@@ -47,3 +47,10 @@ export async function saveReengage(b: any): Promise<string | null> {
   return null;
 }
 export async function clearReengage(key: string) { await getPool().query("DELETE FROM reengage WHERE account_key = $1", [key]); }
+
+/** Event topics + per-contact comments from the "Virtual events data" sheet (latest sync). */
+export async function virtualEvents(): Promise<{ topics: Map<string, { topic: string; partner: string | null }>; notes: Map<string, string> }> {
+  const d = await getSetting<{ events: Array<{ eventId: string; topic: string; partner: string | null }>; notes: Array<{ eventId: string; contactId: string; note: string }> }>("virtual_events");
+  return { topics: new Map((d?.events ?? []).map((e) => [e.eventId, { topic: e.topic, partner: e.partner }])),
+    notes: new Map((d?.notes ?? []).map((n) => [`${n.eventId}:${n.contactId}`, n.note])) };
+}

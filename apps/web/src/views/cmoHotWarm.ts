@@ -144,6 +144,7 @@ async function openDrill(f: any, part: string, olist: string, scope: string, id:
           h("div", { class: "l1" }, redactBox(r), h("b", null, r.contactName), h("span", { class: `hwcls ${r.cls}` }, r.cls === "hot" ? "Hot" : r.cls === "warm" ? "Warm" : "Event signal"),
             r.worked ? h("span", { class: "hwst w" }, r.workedByOther ? `Worked by ${r.workedByOther.by}` : "Worked") : null, h("span", { class: "sp" }), hsLink("contact", r.contactId)),
           h("div", { class: "l2" }, `${r.companyName ?? "No company"} · Account intent: ${r.companyIntent ?? "–"} · Status: ${nice(r.contactStatus)}`),
+          e.topic || e.eventNote ? h("div", { class: "l2 faint" }, [e.topic ? `Topic: ${e.topic}` : null, e.eventNote ? `Event team note: ${e.eventNote}` : null].filter(Boolean).join(" · ")) : null,
           r.breakdown?.length ? h("details", { class: "l2 bd" }, h("summary", null, "Why"), h("ul", null, r.breakdown.map((t: string) => h("li", null, t)))) : null,
           r.sheetNotes?.length ? h("div", { class: "l2 snote" }, `Sheet note: ${r.sheetNotes.join(" · ")}`) : null,
           r.workedByOther ? h("div", { class: "l2 byo" }, r.workedByOther.sameContact ? `${r.workedByOther.by} reached out to this person on ${fmt.day(r.workedByOther.at)}` : `Account being worked: ${r.workedByOther.by} contacted ${r.workedByOther.contactName ?? "a colleague"} at this company on ${fmt.day(r.workedByOther.at)}`) : null,

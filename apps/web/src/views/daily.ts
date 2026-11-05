@@ -222,6 +222,8 @@ export async function dailyView(route: Route, meta: any): Promise<HTMLElement> {
         ...hl.map((t) => h("span", { class: "ohl" }, t)), !f.sdr && a.sdrName ? h("span", { class: "ocown" }, a.sdrName) : null),
       h("div", { class: "oc2" }, h("b", null, c.contactName), c.jobTitle ? ` · ${c.jobTitle}` : "",
         h("span", { class: "osrc" }, ` — ${src.text}`, src.more > 0 ? h("span", { class: "more" }, ` +${src.more} more`) : null)),
+      (() => { const se = strongestEvent(c); const note = (c.events ?? []).map((e: any) => e.eventNote).find(Boolean);
+        return se?.topic || note ? h("div", { class: "octopic" }, se?.topic ? `Topic: ${se.topic.length > 110 ? se.topic.slice(0, 110) + "…" : se.topic}` : "", note ? h("span", { class: "ocnote" }, `${se?.topic ? " · " : ""}Note: ${note.length > 90 ? note.slice(0, 90) + "…" : note}`) : null) : null; })(),
       h("div", { class: "oc3" }, h("span", { class: `onudge t-${nd.tone}` }, nd.text),
         b === "momentum" ? reengagePicker(a) : null,
         h("button", { class: "oexp", onclick: (e: Event) => { e.stopPropagation(); open(); } }, "Explore account →")));
@@ -346,7 +348,9 @@ function accountPanel(a: any, initial: any) {
       blockEl("Event & engagement history",
         evs.length ? h("div", { class: "evh" }, evs.map((e: any) => h("div", { class: "evrow2" },
           h("div", null, h("b", null, short(e.name)), h("span", { class: "faint" }, ` · ${e.category} · ${fmt.day(e.date)}`)),
-          h("div", null, h("span", { class: `pp p-${e.participation}` }, partText(e)), h("span", { class: "faint" }, e.participationSource ? ` · ${e.participationSource}` : ""))))) : h("div", { class: "faint" }, "No event records")),
+          h("div", null, h("span", { class: `pp p-${e.participation}` }, partText(e)), h("span", { class: "faint" }, e.participationSource ? ` · ${e.participationSource}` : "")),
+          e.topic ? h("div", { class: "evtopic" }, `Topic: ${e.topic}`) : null,
+          e.eventNote ? h("div", { class: "evnote" }, `Event team note: ${e.eventNote}`) : null))) : h("div", { class: "faint" }, "No event records")),
       h("details", { class: "pblk" }, h("summary", null, h("h3", { style: "display:inline" }, "Activity history")), timeline),
     );
     api(`leads/${c.eventId}/${c.contactId}`).then((r: any) => {

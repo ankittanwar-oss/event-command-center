@@ -45,6 +45,7 @@ export const env = {
   // Roundtable Google Sheet (read-only). The key is only ever read on the server.
   get googleServiceAccountJson() { return process.env.GOOGLE_SERVICE_ACCOUNT_JSON || ""; },
   roundtableSheetId: str("ROUNDTABLE_SHEET_ID", "1Cpf0eLWVt37ic4Qa2jC5CdG5J2g-4QCcgvUEtmBQId4"),
+  virtualEventsSheetId: str("VIRTUAL_EVENTS_SHEET_ID", "13HuxacNKddnGwAeGtLUj0b5Ppph2o4C8MkECrifVIXU"),
   rulesJson: process.env.RULES_JSON || "",
   timezone: str("REPORTING_TIMEZONE", "America/New_York"),
   logLevel: str("LOG_LEVEL", "info"),
