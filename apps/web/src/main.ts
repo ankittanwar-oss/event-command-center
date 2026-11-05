@@ -12,6 +12,18 @@ import { sdrView } from "./views/sdr.js";
 import { dailyView } from "./views/daily.js";
 
 
+// Theme is chosen in the dashboard (Light by default) and never follows the operating-system setting.
+type Theme = "light" | "dark";
+const getTheme = (): Theme => { try { return localStorage.getItem("ecc-theme") === "dark" ? "dark" : "light"; } catch { return "light"; } };
+const applyTheme = (t: Theme) => { document.documentElement.setAttribute("data-theme", t); try { localStorage.setItem("ecc-theme", t); } catch { /* ignore */ } };
+applyTheme(getTheme());
+function themeToggle() {
+  const mk = (t: Theme, label: string) => h("button", { class: getTheme() === t ? "on" : "", onclick: (e: Event) => {
+    applyTheme(t); const box = (e.currentTarget as HTMLElement).parentElement!; for (const b of Array.from(box.children)) b.classList.toggle("on", b === e.currentTarget);
+  } }, label);
+  return h("div", { class: "themetog", role: "group", "aria-label": "Theme" }, mk("light", "☀ Light"), mk("dark", "☾ Dark"));
+}
+
 const VIEWS: Record<string, { label: string; title: string; render: (r: Route, meta: any) => Promise<HTMLElement>; filters: boolean }> = {
   overview: { label: "CMO overview", title: "CMO overview", render: overviewView, filters: true },
   sdr: { label: "SDR execution", title: "SDR execution", render: sdrView, filters: true },
@@ -149,6 +161,7 @@ async function render() {
     h("aside", { class: "sidebar" },
       h("div", { class: "brand" }, "Events Command Center", h("small", null, "SpotDraft · event follow-up")),
       nav,
+      themeToggle(),
       h("div", { class: "foot" }, `${fmt.n(meta.leadCount)} registrations · as of ${meta.today} · ${meta.build ?? "build unknown"}`)),
     h("main", { class: "main" },
       h("div", { class: "topbar" }, h("span", { class: "title" }, view.title), view.filters ? filterBar(route) : null, freshnessBadge()),
