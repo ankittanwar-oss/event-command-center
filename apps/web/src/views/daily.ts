@@ -223,7 +223,7 @@ export async function dailyView(route: Route, meta: any): Promise<HTMLElement> {
       h("div", { class: "oc2" }, h("b", null, c.contactName), c.jobTitle ? ` · ${c.jobTitle}` : "",
         h("span", { class: "osrc" }, ` — ${src.text}`, src.more > 0 ? h("span", { class: "more" }, ` +${src.more} more`) : null)),
       (() => { const se = strongestEvent(c); const note = (c.events ?? []).map((e: any) => e.eventNote).find(Boolean);
-        return se?.topic || note ? h("div", { class: "octopic" }, se?.topic ? `${short(se.name)}: ${se.topic.length > 90 ? se.topic.slice(0, 90) + "…" : se.topic}` : "",
+        return se?.topic || note ? h("div", { class: "octopic" }, se?.topic ? `Session: ${se.topic.length > 100 ? se.topic.slice(0, 100) + "…" : se.topic}` : "",
           se?.about?.hook ? h("div", { class: "ochook" }, `Talking point: ${se.about.hook}`) : null, note ? h("span", { class: "ocnote" }, `${se?.topic ? " · " : ""}Note: ${note.length > 90 ? note.slice(0, 90) + "…" : note}`) : null) : null; })(),
       h("div", { class: "oc3" }, h("span", { class: `onudge t-${nd.tone}` }, nd.text),
         b === "momentum" ? reengagePicker(a) : null,
@@ -338,6 +338,18 @@ function accountPanel(a: any, initial: any) {
           kv("Your touches", `${c.yourTouches} by ${firstName(a.sdrName) || "the SDR"}${c.otherSdrTouches ? ` · ${c.otherSdrTouches} by another SDR earlier (not credited)` : ""}`),
           kv("Disposition", c.disposition ? `${c.disposition.reason ?? ""}${c.disposition.source === "hubspot" ? " (HubSpot)" : ` · confirmed by ${c.disposition.confirmedBy}`}` : null)),
         h("div", null, h("span", { class: "linkbtn", onclick: () => dispositionForm("contact", c.contactId, c.contactName, c.disposition) }, c.disposition ? "Edit contact disposition" : "Record a disposition for this contact"))),
+      ...(() => {
+        const withCtx = evs.filter((e: any) => e.about || e.topic || e.eventNote);
+        if (!withCtx.length) return [];
+        const top = strongestEvent(c);
+        const list = top && withCtx.includes(top) ? [top, ...withCtx.filter((e: any) => e !== top)] : withCtx;
+        return [blockEl("Event context", ...list.slice(0, 3).map((e: any, i: number) => h("div", { class: `ectx ${i ? "sec" : ""}` },
+          h("div", { class: "ectitle" }, h("b", null, e.about?.title ?? e.topic ?? short(e.name)), h("span", { class: "faint" }, ` · ${fmt.day(e.date)} · ${partText(e)}`)),
+          e.about ? h("div", { class: "ecspk" }, e.about.speakers) : null,
+          e.about ? h("div", { class: "ecsum" }, e.about.summary) : null,
+          e.about ? h("div", { class: "evhook" }, h("b", null, "Conversation starter: "), e.about.hook) : null,
+          e.eventNote ? h("div", { class: "evnote" }, `Event team note: ${e.eventNote}`) : null)))];
+      })(),
       h("div", { class: "pduo" },
         h("div", { class: `pbig i-${it.cls}` }, h("small", null, "ACCOUNT INTENT"), h("b", null, it.text),
           h("div", null, [a.intent?.since ? `since ${fmt.day(a.intent.since)}` : null, a.intent?.sdrCategory, a.intent?.reason ?? "detailed trigger not recorded"].filter(Boolean).join(" · ")),
@@ -351,10 +363,8 @@ function accountPanel(a: any, initial: any) {
           h("div", null, h("b", null, short(e.name)), h("span", { class: "faint" }, ` · ${e.category} · ${fmt.day(e.date)}`)),
           h("div", null, h("span", { class: `pp p-${e.participation}` }, partText(e)), h("span", { class: "faint" }, e.participationSource ? ` · ${e.participationSource}` : "")),
           e.topic ? h("div", { class: "evtopic" }, `Topic: ${e.topic}`) : null,
-          e.about ? h("details", { class: "evabout" }, h("summary", null, "About this session"),
-            h("div", null, h("b", null, "Speakers: "), e.about.speakers), h("div", null, e.about.summary),
-            h("div", { class: "evhook" }, h("b", null, "Conversation starter: "), e.about.hook)) : null,
-          e.eventNote ? h("div", { class: "evnote" }, `Event team note: ${e.eventNote}`) : null))) : h("div", { class: "faint" }, "No event records")),
+
+          null))) : h("div", { class: "faint" }, "No event records")),
       h("details", { class: "pblk" }, h("summary", null, h("h3", { style: "display:inline" }, "Activity history")), timeline),
     );
     api(`leads/${c.eventId}/${c.contactId}`).then((r: any) => {

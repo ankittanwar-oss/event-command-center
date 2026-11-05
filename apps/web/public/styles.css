@@ -765,3 +765,6 @@ details.moresec > summary { cursor: pointer; font-weight: 600; padding: 8px 0; o
 
 .ochook{font-size:12.5px;color:#15803d;margin-top:2px}
 .evabout{font-size:12.5px;margin-top:4px}.evabout summary{cursor:pointer;color:#374151}.evabout>div{margin-top:4px}.evhook{color:#15803d}
+
+.ectx{font-size:13px;line-height:1.45}.ectx.sec{margin-top:10px;padding-top:10px;border-top:1px solid rgba(0,0,0,.07)}
+.ectitle b{font-size:14px}.ecspk{color:#4b5563;margin-top:2px}.ecsum{margin-top:4px}.ectx .evhook{margin-top:4px}
