@@ -288,10 +288,14 @@ export async function dailyView(route: Route, meta: any): Promise<HTMLElement> {
   adv.addEventListener("toggle", () => { st.advanced = (adv as HTMLDetailsElement).open; persist(); });
   const S = d.accountView.summary;
   const prog = h("details", { class: "myprog", ...(st.progress ? { open: true } : {}) }, h("summary", null, "Your progress"),
-    h("div", { class: "mpg" }, ...[
-      ["Accounts", fmt.n(S.accounts)], ["Contacted", `${fmt.n(S.worked)} (${fmt.pct(S.coveragePct)})`], ["Not contacted yet", fmt.n(S.notWorked)],
-      ["People contacted", `${fmt.n(S.contactsWorked)} of ${fmt.n(S.contacts)}`], ["Qualified", fmt.n(S.qualified)], ["Paused", fmt.n(S.paused)],
-    ].map(([l, v]) => h("div", { class: "mp" }, h("b", null, v), h("span", null, l)))));
+    h("div", { class: "mpg" }, ...([
+      ["Accounts", fmt.n(S.accounts), (a: any) => true],
+      ["Contacted", `${fmt.n(S.worked)} (${fmt.pct(S.coveragePct)})`, (a: any) => a.worked || !!a.workedByOther],
+      ["Not contacted yet", fmt.n(S.notWorked), (a: any) => !a.worked && !a.workedByOther],
+      ["People contacted", `${fmt.n(S.contactsWorked)} of ${fmt.n(S.contacts)}`, (a: any) => a.coverage.contacted > 0],
+      ["Qualified", fmt.n(S.qualified), (a: any) => a.bucket === "qualified"],
+      ["Paused", fmt.n(S.paused), (a: any) => a.bucket === "paused"],
+    ] as Array<[string, string, (a: any) => boolean]>).map(([l, v, test]) => h("button", { class: "mp mpbtn", onclick: () => progressList(l, all.filter(test)) }, h("b", null, v), h("span", null, l)))));
   prog.addEventListener("toggle", () => { st.progress = (prog as HTMLDetailsElement).open; persist(); });
 
   const fr = meta?.freshness;
@@ -488,4 +492,20 @@ function hideBox(a: any) {
 async function redact(c: any, a: any, reason: string) {
   await api("redactions", undefined, { method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ contactId: c.contactId, contactName: c.contactName, companyName: a.companyName, events: (c.events ?? []).map((e: any) => e.name).join(", "), reason, redactedBy: myName() }) });
+}
+
+/** "Your progress" tiles open the accounts behind the number; each opens the account panel. */
+function progressList(label: string, accounts: any[]) {
+  const box = h("div", { class: "apanel" });
+  openCustom(`${label} (${accounts.length})`, "Accounts behind this number, with your current filters", box);
+  const name = (a: any) => (a.companyName ?? "").toLowerCase();
+  box.append(h("div", { class: "plist" }, accounts.length ? [...accounts].sort((x, y) => name(x).localeCompare(name(y))).map((a) => {
+    const c = recommend(a);
+    const last = a.lastSdrTouch ?? a.workedByOther?.at ?? null;
+    return h("button", { class: "plrow", onclick: () => accountPanel(a, c) },
+      h("div", null, h("b", null, a.companyName ?? "(no company)"), h("span", { class: "faint" }, ` · ${intentInfo(a.intent).text}`)),
+      h("div", { class: "faint" }, [`${a.coverage.contacted}/${a.coverage.available} contacts reached`,
+        last ? `last contact ${fmt.day(last)}${a.workedByOther && !a.worked ? ` by ${a.workedByOther.by?.name ?? "another rep"}` : ""}` : "not contacted yet",
+        a.reengageOn ? `re-engage ${fmt.day(a.reengageOn)}` : null].filter(Boolean).join(" · ")));
+  }) : [h("div", { class: "faint" }, "No accounts.")]));
 }

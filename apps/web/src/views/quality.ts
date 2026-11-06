@@ -11,6 +11,7 @@ const FLAG_LABEL: Record<string, string> = {
   temperature_unmapped_value: "Lead temperature value not mapped to Hot/Warm (e.g. Surging)",
   sdr_missing: "Company has no SDR owner",
   sdr_not_on_roster: "SDR owner is not on the approved roster (AE or former SDR)",
+  sdr_from_outreach: "No usable SDR owner in HubSpot: attributed to the roster SDR doing outreach (fix the SDR Owner in HubSpot)",
   allocation_date_missing: "SDR assigned but allocation date unknown",
   event_date_missing: "Event date missing",
   event_uncategorized: "Event could not be categorised",

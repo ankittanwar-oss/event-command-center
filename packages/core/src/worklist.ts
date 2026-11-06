@@ -643,6 +643,7 @@ export function accountWorklist(items: CItem[], today?: string, rules?: Rules) {
       bucket, worked: isWorked, top, contacts, companyDisposition: companyDisp,
       coverage: {
         available: cs.length, worked: worked.length, notWorked: cs.length - worked.length,
+        contacted: cs.filter((c: any) => c.yourTouches > 0 || !!c.otherRepTouch).length,
         active: cs.filter((c) => c.conversation).length, paused: count("paused"), qualified: count("qualified"),
       },
       actions: { respond: count("respond"), follow_up: count("follow_up"), first_outreach: count("first_outreach"), review: count("review"), progress: count("progress"), paused: count("paused"), low: count("low"), qualified: count("qualified") },
@@ -659,8 +660,8 @@ type Acct = ReturnType<typeof accountWorklist>[number];
 /** Metric predicates: the SAME functions produce the CMO counts and the drill-down lists, so they always reconcile. */
 export const ACCOUNT_METRICS: Record<string, { label: string; test: (a: Acct) => boolean; contactsOnly?: (c: Acct["contacts"][number]) => boolean }> = {
   eligible: { label: "Eligible accounts", test: () => true },
-  worked: { label: "Accounts worked", test: (a) => a.worked },
-  not_worked: { label: "Not worked", test: (a) => !a.worked },
+  worked: { label: "Accounts contacted", test: (a) => a.worked || !!a.workedByOther },
+  not_worked: { label: "Not contacted yet", test: (a) => !a.worked && !a.workedByOther },
   need_follow_up: { label: "Follow-up opportunities", test: (a) => a.bucket === "follow_up" },
   stale14: { label: "Worked, no outreach in 14+ business days", test: (a) => a.worked && (a.daysSinceLast ?? 0) >= 14 },
   sla_breach: { label: "First-touch SLA breached", test: (a) => a.slaBreach },
@@ -679,7 +680,7 @@ export function accountSummary(accounts: ReturnType<typeof accountWorklist>) {
   const M = ACCOUNT_METRICS;
   const n = (p: (a: (typeof accounts)[number]) => boolean) => accounts.filter(p).length;
   const contacts = accounts.reduce((s, a) => s + a.coverage.available, 0);
-  const contactsWorked = accounts.reduce((s, a) => s + a.coverage.worked, 0);
+  const contactsWorked = accounts.reduce((s, a) => s + a.coverage.contacted, 0);
   const contactDisp: Record<string, number> = {}, companyDisp: Record<string, number> = {};
   for (const a of accounts) {
     if (a.companyDisposition) companyDisp[a.companyDisposition.code] = (companyDisp[a.companyDisposition.code] ?? 0) + 1;

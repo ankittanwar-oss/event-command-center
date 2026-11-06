@@ -428,3 +428,17 @@ test("a note logged by our team around a HOSTED event makes the person a Hot lea
     acts: [act({ ts: "2026-10-20T15:00:00Z", kind: "NOTE", objectType: "notes" as any, direction: null, title: "Great chat about CLM" })] }), R, NOV)[0]!;
   assert.equal(leadHotWarm(spoke).cls, "hot"); assert.equal(spoke.touchesSinceEligibility, 0);
 });
+
+test("marketing pseudo SDR owner + AE without a pod: the roster SDR doing outreach owns the account (Milhouse/Adam case)", async () => {
+  const ADAM = "101731640", ANNA = "86492694", CONLEY = "102223703";
+  const NOV = "2026-11-06";
+  const ds = dataset({ companies: [company({ sdrOwnerId: ANNA, hubspotOwnerId: CONLEY } as any)], events: [event({ date: "2026-10-20", category: "owned", name: "Beacon LIVE NYC" })],
+    links: [["e1", "c1", "2026-10-20"]], acts: [act({ ts: "2026-11-05T21:53:47Z", ownerId: ADAM, title: "Email: >> Contracts at Milhouse" })] });
+  const f = computeLeadFacts(ds, R, NOV)[0]!;
+  assert.equal(f.sdrOwnerId, ADAM);
+  assert.ok(f.dataQuality.includes("sdr_from_outreach"));
+  assert.ok((f.currentSdrTouches ?? 0) > 0);
+  // no outreach -> stays unassigned
+  const g = computeLeadFacts(dataset({ companies: [company({ sdrOwnerId: ANNA, hubspotOwnerId: CONLEY } as any)] }), R, NOV)[0]!;
+  assert.equal(g.sdrOwnerId, null);
+});

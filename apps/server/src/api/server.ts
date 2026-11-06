@@ -15,7 +15,7 @@ import * as v from "./views.js";
 import { EVENT_DESCRIPTIONS } from "./eventDescriptions.js";
 import { clearReengage, loadReengage, loadRedactions, redactedIds, restoreRedaction, saveReengage, saveRedaction, sheetNotes, virtualEvents } from "./redactions.js";
 
-export const BUILD = "update-52";
+export const BUILD = "update-54";
 
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",

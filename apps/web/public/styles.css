@@ -777,3 +777,8 @@ html[data-theme="dark"] select, html[data-theme="dark"] input, html[data-theme="
 .themetog{display:flex;gap:4px;margin:8px 0 4px;padding:3px;background:var(--sunken);border:1px solid var(--border);border-radius:8px}
 .themetog button{flex:1;border:0;background:transparent;color:var(--muted);font:inherit;font-size:12px;padding:4px 6px;border-radius:6px;cursor:pointer}
 .themetog button.on{background:var(--panel);color:var(--text);box-shadow:var(--shadow)}
+
+.mpbtn{font:inherit;text-align:left;cursor:pointer;color:inherit}.mpbtn:hover{border-color:var(--accent)}
+.plist{display:flex;flex-direction:column;gap:6px}.plrow{font:inherit;color:inherit;text-align:left;background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:10px 12px;cursor:pointer}
+.plrow:hover{border-color:var(--accent)}
+.mpbtn{background:var(--panel)}

@@ -130,9 +130,19 @@ export function computeLeadFact(
   // a roster SDR (e.g. the outreach pseudo-SDR "Anna S").
   const viaPod = !!podSdr && !(companySdr && (podSdrs.has(companySdr) || isRosterSdr(companySdr)));
   const sdrRaw = viaPod ? podSdr : companySdr;
-  const sdr = isRosterSdr(sdrRaw) ? sdrRaw : null;
+  let sdr = isRosterSdr(sdrRaw) ? sdrRaw : null;
   if (company && !companySdr && !viaPod) dq.push("sdr_missing");
   else if (sdrRaw && !sdr) dq.push("sdr_not_on_roster");
+  // Fallback when HubSpot names no usable SDR (empty, the marketing pseudo-owner "Anna S", or an inactive user) and the
+  // AE has no pod: the roster SDR who has actually been doing outreach to this account since the event owns it in the
+  // dashboard. Flagged in Data Quality so the HubSpot SDR Owner can be corrected. HubSpot itself is never changed.
+  if (!sdr && ev.date) {
+    const acts = [...(ds.activitiesByContact.get(contact.id) ?? []), ...(company ? ds.activitiesByCompany.get(company.id) ?? [] : [])];
+    const out = acts.filter((a) => !!a.ownerId && isRosterSdr(a.ownerId) && toDate(a.timestamp)! >= ev.date! &&
+      ((a.kind === "EMAIL" && (a.direction || "EMAIL").toUpperCase() === "EMAIL") || (a.kind === "CALL" && (a.direction || "").toUpperCase() !== "INBOUND") || a.kind === "LINKEDIN"))
+      .sort((a, b) => b.timestamp.localeCompare(a.timestamp))[0];
+    if (out) { sdr = out.ownerId!; dq.push("sdr_from_outreach"); }
+  }
 
   const allocationDate = toDate(company?.allocationDate ?? null);
   if (sdr && !allocationDate) dq.push("allocation_date_missing");
